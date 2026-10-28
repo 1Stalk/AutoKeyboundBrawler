@@ -115,9 +115,9 @@ public static unsafe class AddonKTGEnemyCastBar
     /// e.g. "??? Needles", "1,000 Needles", "10,000 Needles", "Needles", "Countless Needles", etc.
     /// Supports all client localizations via KTGLocalizationRegistry.
     /// </summary>
-    public static bool IsNeedlesSpell(string? spellName)
+    public static bool IsNeedlesSpell(string? spellName, uint actionId = 0)
     {
-        return KTGLocalizationRegistry.IsNeedlesSpell(spellName);
+        return KTGLocalizationRegistry.IsNeedlesSpell(spellName, actionId);
     }
 
     public static bool HasActiveNeedlesCast(out KTGActiveCast? needlesCast)

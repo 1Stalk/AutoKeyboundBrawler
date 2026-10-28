@@ -159,19 +159,31 @@ public static class KTGWordDatabase
 
     /// <summary>
     /// Removes the 4 allowed punctuation marks (!, ?, ', -) while preserving spaces.
+    /// In French typography, exclamation and question marks are preceded by a space (e.g. "tous !").
+    /// Stripping the punctuation also removes any trailing space before it and trims the result,
+    /// preventing a phantom trailing space from being typed at the end of the sentence.
     /// </summary>
     public static string StripPunctuation(string input)
     {
         if (string.IsNullOrEmpty(input)) return string.Empty;
         var sb = new System.Text.StringBuilder(input.Length);
-        foreach (var c in input)
+        for (var i = 0; i < input.Length; i++)
         {
+            var c = input[i];
+
+            // If a space is immediately followed by a punctuation mark being stripped (common in French: " !"),
+            // skip the space as well so it doesn't become a dangling trailing space or double space.
+            if (c == ' ' && i + 1 < input.Length && input[i + 1] is '!' or '?')
+            {
+                continue;
+            }
+
             if (c is not ('!' or '?' or '\'' or '-'))
             {
                 sb.Append(c);
             }
         }
-        return sb.ToString();
+        return sb.ToString().Trim();
     }
 
     public static WordEntry? FindMatch(string promptText)

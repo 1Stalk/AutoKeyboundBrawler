@@ -50,9 +50,9 @@ public unsafe class KTGInputSimulator
         _isSubmittingWord = false;
         JustSubmitted = false;
 
-        var textToType = config.IgnorePunctuation
+        var textToType = (config.IgnorePunctuation
             ? Data.KTGWordDatabase.StripPunctuation(word)
-            : word;
+            : word).Trim();
 
         foreach (var ch in textToType)
         {

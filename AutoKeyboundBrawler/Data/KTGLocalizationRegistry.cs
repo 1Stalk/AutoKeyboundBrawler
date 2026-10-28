@@ -133,13 +133,20 @@ public static class KTGLocalizationRegistry
     // ------------------------------------------------------------------------
     public static readonly uint[] CactuarRowIds = [501, 841, 987, 991, 1224, 1453, 1728];
 
+    public static readonly uint[] NeedlesActionIds = [49524, 48580, 48581, 39023];
+
     public static readonly string[] LocalizedNeedlesSpellRoots =
     [
-        "needle",       // English (Needles, 1,000 Needles, etc.)
-        "はり",         // Japanese (はりせんぼん)
-        "nadel",        // German (1.000 Nadeln)
-        "épine",        // French (1 000 épines)
-        "aiguille"      // French
+        "needle",       // English (??? Needles, 1,000 Needles, etc.)
+        "stachel",      // German (???-Stacheln)
+        "nadel",        // German (1.000 Nadeln, ??? Nadeln)
+        "épine",        // French (??? Épines, 1 000 épines)
+        "epine",        // French (??? Epines - unaccented fallback)
+        "aiguille",     // French (1000 aiguilles)
+        "針",           // Japanese Kanji (針？本, 針千本, 針幾千本)
+        "はり",         // Japanese Hiragana
+        "???",          // Signature of Cactuar ??? Needles across European localizations
+        "？"            // Fullwidth question mark in Japanese 針？本
     ];
 
     public static readonly string[] LocalizedCactuarRoots =
@@ -152,9 +159,15 @@ public static class KTGLocalizationRegistry
         "sabotender"
     ];
 
-    public static bool IsNeedlesSpell(string? spellName)
+    public static bool IsNeedlesSpell(string? spellName, uint actionId = 0)
     {
+        if (actionId > 0 && NeedlesActionIds.Contains(actionId))
+        {
+            return true;
+        }
+
         if (string.IsNullOrWhiteSpace(spellName)) return false;
+
         return LocalizedNeedlesSpellRoots.Any(root => spellName.Contains(root, StringComparison.OrdinalIgnoreCase));
     }
 
