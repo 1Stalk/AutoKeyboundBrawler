@@ -27,7 +27,12 @@ Type `/akb` in-game to open the config panel. Toggle what you need and let the s
 
 This plugin is developed under the [Dalamud AI Policy](https://dalamud.dev/plugin-publishing/ai-policy/) at the **Copilot** level. How AI is used to build this plugin is written down in [AI-USAGE.md](AI-USAGE.md).
 
+## More from me
+
+If you liked this plugin, take a look at my other Dalamud work. You might find something else there for you.
+
+→ [1Stalk Dalamud Plugins](https://github.com/1Stalk/DalamudPlugins)
+
 ## License
 
 This project is licensed under the [GNU AGPL v3](LICENSE.md).
-
