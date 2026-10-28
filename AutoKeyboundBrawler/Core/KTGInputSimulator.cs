@@ -56,6 +56,11 @@ public unsafe class KTGInputSimulator
 
         foreach (var ch in textToType)
         {
+            if (TryEnqueueCircumflex(ch, _pendingActions))
+            {
+                continue;
+            }
+
             if (TryCharToVirtualKey(ch, out var vk))
             {
                 _pendingActions.Enqueue(new KeyAction(vk));
@@ -289,6 +294,57 @@ public unsafe class KTGInputSimulator
         PInvoke.SendInput((uint)inputs.Length, inputs, sizeof(INPUT));
     }
 
+    private static bool TryEnqueueCircumflex(char ch, Queue<KeyAction> queue)
+    {
+        SeVirtualKey baseVowel;
+        switch (ch)
+        {
+            case 'â':
+            case 'Â':
+                baseVowel = SeVirtualKey.A;
+                break;
+            case 'ê':
+            case 'Ê':
+                baseVowel = SeVirtualKey.E;
+                break;
+            case 'î':
+            case 'Î':
+                baseVowel = SeVirtualKey.I;
+                break;
+            case 'ô':
+            case 'Ô':
+                baseVowel = SeVirtualKey.O;
+                break;
+            case 'û':
+            case 'Û':
+                baseVowel = SeVirtualKey.U;
+                break;
+            default:
+                return false;
+        }
+
+        var deadKey = GetCircumflexDeadKey();
+        queue.Enqueue(new KeyAction(deadKey));
+        queue.Enqueue(new KeyAction(baseVowel));
+        return true;
+    }
+
+    private static SeVirtualKey GetCircumflexDeadKey()
+    {
+        var scan = PInvoke.VkKeyScan('^');
+        if (scan != -1)
+        {
+            var vk = (byte)(scan & 0xFF);
+            if (vk != 0)
+            {
+                return (SeVirtualKey)vk;
+            }
+        }
+
+        // On French AZERTY, VK_OEM_6 (0xDD) is the circumflex dead key
+        return (SeVirtualKey)0xDD;
+    }
+
     private static bool TryCharToVirtualKey(char c, out SeVirtualKey key)
     {
         // 1. Direct German QWERTZ OEM virtual key mapping
@@ -335,26 +391,20 @@ public unsafe class KTGInputSimulator
             case 'Ù':
                 key = (SeVirtualKey)0xC0; // VK_OEM_3
                 return true;
-            case 'ê':
-            case 'ë':
-                key = SeVirtualKey.E;
-                return true;
-            case 'â':
-                key = SeVirtualKey.A;
-                return true;
-            case 'î':
-            case 'ï':
-                key = SeVirtualKey.I;
-                return true;
-            case 'ô':
-                key = SeVirtualKey.O;
-                return true;
-            case 'û':
-                key = SeVirtualKey.U;
-                return true;
         }
 
-        // 3. Dynamic lookup via active Windows keyboard layout
+        // 3. Digits '0'..'9': MUST be mapped to Numpad virtual keys (0x60..0x69) BEFORE VkKeyScan.
+        // On French AZERTY, physical top-row keys 0..9 require Shift and produce &, é, ", ', (, -, è, _, ç, à unshifted.
+        // VkKeyScan('1') on AZERTY returns VK 0x31 (KEY_1) with shift state 1; sending 0x31 without Shift produces '&'.
+        // Numeric keypad keys (NUMPAD0..NUMPAD9, 0x60..0x69) unconditionally produce digits '0'..'9'
+        // across all keyboard layouts in Windows and FFXIV without requiring Shift.
+        if (c is >= '0' and <= '9')
+        {
+            key = (SeVirtualKey)((int)SeVirtualKey.NUMPAD0 + (c - '0'));
+            return true;
+        }
+
+        // 4. Dynamic lookup via active Windows keyboard layout
         var scan = PInvoke.VkKeyScan(c);
         if (scan == -1 && char.IsUpper(c))
         {
@@ -364,14 +414,17 @@ public unsafe class KTGInputSimulator
         if (scan != -1)
         {
             var vk = (byte)(scan & 0xFF);
-            if (vk != 0)
+            var shiftState = (byte)((scan >> 8) & 0xFF);
+            // Only use VkKeyScan if the key does not require modifiers like Shift (shiftState == 0),
+            // OR if it is a standard letter (A-Z) where the game accepts unshifted input.
+            if (vk != 0 && (shiftState == 0 || (c is >= 'a' and <= 'z') || (c is >= 'A' and <= 'Z')))
             {
                 key = (SeVirtualKey)vk;
                 return true;
             }
         }
 
-        // 4. Standard ASCII alphanumeric fallbacks
+        // 5. Standard ASCII alphanumeric fallbacks
         if (c is >= 'a' and <= 'z')
         {
             key = (SeVirtualKey)((int)SeVirtualKey.A + (c - 'a'));
@@ -381,12 +434,6 @@ public unsafe class KTGInputSimulator
         if (c is >= 'A' and <= 'Z')
         {
             key = (SeVirtualKey)((int)SeVirtualKey.A + (c - 'A'));
-            return true;
-        }
-
-        if (c is >= '0' and <= '9')
-        {
-            key = (SeVirtualKey)((int)SeVirtualKey.KEY_0 + (c - '0'));
             return true;
         }
 
