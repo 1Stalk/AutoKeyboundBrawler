@@ -21,7 +21,7 @@ https://github.com/user-attachments/assets/91bab7d2-9797-4ddb-95b3-ba4bafde052e
 
 ## Features
 
-Multi-Language Support (EN / DE / FR / JA) · Humanized Typing · Smart Target Priority · Defense Preemption · Obstruction Safety · Obscured Word Memory · Punctuation Skip · AFK Duty Loop · Anti-AFK Kick Protection
+Multi-Language Support (EN / DE / FR / 日本語) · Humanized Typing · Smart Target Priority · Defense Preemption · Obstruction Safety · Obscured Word Memory · Punctuation Skip · AFK Duty Loop · Anti-AFK Kick Protection
 
 Type `/akb` in-game to open the config panel. Toggle what you need and let the solver handle the rest.
 

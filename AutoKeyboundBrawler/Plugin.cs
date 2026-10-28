@@ -68,9 +68,120 @@ public sealed class Plugin : IDalamudPlugin
         Svc.Log.Information("[AutoKeyboundBrawler] Plugin initialized successfully.");
     }
 
+    private bool _hasTriggeredProximityOpen;
+    private long _lastProximityCheckTick;
+
     private void OnFrameworkUpdate(IFramework framework)
     {
+        CheckRegistrarProximity();
         _automation.Tick();
+    }
+
+    private void CheckRegistrarProximity()
+    {
+        if (!Configuration.AutoOpenNearRegistrar)
+        {
+            return;
+        }
+
+        // Throttle check to every 250ms
+        var now = Environment.TickCount64;
+        if (now - _lastProximityCheckTick < 250)
+        {
+            return;
+        }
+        _lastProximityCheckTick = now;
+
+        // If in loading screen, disconnected, or between areas, reset trigger
+        if (!Svc.ClientState.IsLoggedIn ||
+            Svc.Objects.LocalPlayer == null ||
+            Svc.Condition[Dalamud.Game.ClientState.Conditions.ConditionFlag.BetweenAreas])
+        {
+            _hasTriggeredProximityOpen = false;
+            return;
+        }
+
+        // If inside Duty, reset flag so it re-triggers when returning to Square
+        if (KTGSafetyGuard.IsInEventDuty ||
+            Svc.Condition[Dalamud.Game.ClientState.Conditions.ConditionFlag.BoundByDuty])
+        {
+            _hasTriggeredProximityOpen = false;
+            return;
+        }
+
+        var localPlayer = Svc.Objects.LocalPlayer;
+        if (localPlayer == null) return;
+
+        var registrar = FindNearbyRegistrar(12.0f);
+        if (registrar != null)
+        {
+            var dist = System.Numerics.Vector3.Distance(localPlayer.Position, registrar.Position);
+            if (dist <= 7.0f)
+            {
+                if (!_hasTriggeredProximityOpen)
+                {
+                    _hasTriggeredProximityOpen = true;
+                    if (!_mainWindow.IsOpen)
+                    {
+                        _mainWindow.IsOpen = true;
+                        Svc.Log.Information($"[AutoKeyboundBrawler] Keybound Registrar in interaction range ({dist:F1}y). Auto-opened interface.");
+                    }
+                }
+            }
+            else if (dist > 9.5f)
+            {
+                // Hysteresis: reset trigger once player walks away
+                _hasTriggeredProximityOpen = false;
+            }
+        }
+        else
+        {
+            _hasTriggeredProximityOpen = false;
+        }
+    }
+
+    private static Dalamud.Game.ClientState.Objects.Types.IGameObject? FindNearbyRegistrar(float maxDistance)
+    {
+        var localPlayer = Svc.Objects.LocalPlayer;
+        if (localPlayer == null) return null;
+
+        // Fast path: Current target is already Keybound Registrar
+        if (Svc.Targets.Target != null &&
+            KTGLocalizationRegistry.IsRegistrar(Svc.Targets.Target.BaseId, Svc.Targets.Target.Name.TextValue))
+        {
+            var dist = System.Numerics.Vector3.Distance(localPlayer.Position, Svc.Targets.Target.Position);
+            if (dist <= maxDistance)
+            {
+                return Svc.Targets.Target;
+            }
+        }
+
+        // Full enumeration of game objects
+        foreach (var obj in Svc.Objects)
+        {
+            if (obj == null) continue;
+            if (KTGLocalizationRegistry.IsRegistrar(obj.BaseId, obj.Name.TextValue))
+            {
+                var dist = System.Numerics.Vector3.Distance(localPlayer.Position, obj.Position);
+                if (dist <= maxDistance)
+                {
+                    return obj;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    public void OpenUI()
+    {
+        _mainWindow.IsOpen = true;
+    }
+
+    public bool IsUIOpen
+    {
+        get => _mainWindow.IsOpen;
+        set => _mainWindow.IsOpen = value;
     }
 
     private void OnCommand(string command, string args)

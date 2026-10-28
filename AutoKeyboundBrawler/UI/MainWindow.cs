@@ -15,7 +15,7 @@ public class MainWindow : Window, IDisposable
     private const ImGuiWindowFlags BaseFlags =
         ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse | ImGuiWindowFlags.NoCollapse;
 
-    private static readonly Vector2 DefaultSize = new(280, 260);
+    private static readonly Vector2 DefaultSize = new(280, 290);
     private static readonly WindowSizeConstraints CompactConstraints = new()
     {
         MinimumSize = new Vector2(240, HeaderBar.Height),
@@ -24,7 +24,7 @@ public class MainWindow : Window, IDisposable
     private static readonly WindowSizeConstraints ExpandedConstraints = new()
     {
         MinimumSize = new Vector2(260, 220),
-        MaximumSize = new Vector2(360, 420),
+        MaximumSize = new Vector2(360, 480),
     };
 
     private readonly Configuration _config;
@@ -175,6 +175,14 @@ public class MainWindow : Window, IDisposable
                 FF7RTheme.AtbGold, "Automatically interacts with Registrar, confirms entry, commences duty, and exits results."))
             {
                 _config.SetAutoLoop(autoLoop);
+            }
+
+            var autoOpen = _config.AutoOpenNearRegistrar;
+            if (FF7ToggleSwitch.DrawRow("##auto_open_reg", "Auto-Open Near Registrar", "Open UI automatically in interaction range", ref autoOpen,
+                FF7RTheme.MakoCyan, "Automatically opens this interface whenever you approach the Keybound Registrar NPC."))
+            {
+                _config.AutoOpenNearRegistrar = autoOpen;
+                _config.Save();
             }
 
             // 3. Section: SPEED

@@ -18,6 +18,9 @@ public class Configuration : IPluginConfiguration
     // Primary Toggle 2: Out-of-duty AFK Loop Automation
     public bool AutoLoopEnabled { get; set; } = false;
 
+    // Automatic Proximity UI Open
+    public bool AutoOpenNearRegistrar { get; set; } = true;
+
     // Granular AFK Loop Sub-Flags (synchronized with AutoLoopEnabled)
     public bool AutoTalkRegistrar { get; set; } = false;
     public bool AutoConfirmRegister { get; set; } = false;
