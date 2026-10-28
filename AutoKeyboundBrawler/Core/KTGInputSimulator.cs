@@ -109,6 +109,7 @@ public unsafe class KTGInputSimulator
     /// <summary>
     /// Safely clears the typing input buffer:
     /// - Checks that KTGInput actually contains text before sending Escape.
+    /// - Verifies that KTGInput is active before sending Escape (if inactive, presses Enter first to activate).
     /// - Strictly throttles Escape to at most once per 600ms to prevent double-press triggering the Exit Duty / System Menu.
     /// </summary>
     public static bool TryClearInputBuffer()
@@ -120,7 +121,16 @@ public unsafe class KTGInputSimulator
             return false;
         }
 
-        // 2. Strict throttle: at most once every 600ms to eliminate any chance of double-tap
+        // 2. If the text input is NOT active, NEVER send Escape!
+        // Pressing Escape on an unfocused text window cancels target and opens the System Menu.
+        // Send Enter first to activate the text window.
+        if (!Interop.AddonKTGInput.IsInputActive())
+        {
+            SendKey(SeVirtualKey.RETURN);
+            return false;
+        }
+
+        // 3. Strict throttle: at most once every 600ms to eliminate any chance of double-tap
         if ((DateTime.UtcNow - _lastEscapeTime).TotalMilliseconds < 600)
         {
             return false;

@@ -1,5 +1,6 @@
 using ECommons;
 using FFXIVClientStructs.FFXIV.Component.GUI;
+using System;
 
 namespace AutoKeyboundBrawler.Interop;
 
@@ -12,6 +13,39 @@ public static unsafe class AddonKTGInput
         return GenericHelpers.TryGetAddonByName(AddonName, out addon) &&
                addon != null &&
                addon->IsVisible;
+    }
+
+    public static AtkComponentTextInput* GetTextInput()
+    {
+        if (!TryGet(out var addon) || !addon->IsReady)
+        {
+            return null;
+        }
+
+        for (var i = 0; i < addon->UldManager.NodeListCount; i++)
+        {
+            var node = addon->UldManager.NodeList[i];
+            if (node != null && node->NodeId == 7 && (int)node->Type >= 1000)
+            {
+                var compNode = (AtkComponentNode*)node;
+                return (AtkComponentTextInput*)compNode->Component;
+            }
+        }
+
+        return null;
+    }
+
+    public static bool IsInputActive()
+    {
+        try
+        {
+            var input = GetTextInput();
+            return input != null && input->IsActive;
+        }
+        catch
+        {
+            return true;
+        }
     }
 
     /// <summary>
