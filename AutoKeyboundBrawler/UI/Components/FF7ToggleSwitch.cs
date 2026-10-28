@@ -7,8 +7,8 @@ namespace AutoKeyboundBrawler.UI.Components;
 
 internal static class FF7ToggleSwitch
 {
-    private const float TrackWidth = 36f;
-    private const float TrackHeight = 18f;
+    private const float TrackWidth = 28f;
+    private const float TrackHeight = 14f;
     private const float KnobInset = 2f;
 
     public static bool Draw(string id, ref bool value, Vector4? activeColor = null)
@@ -75,10 +75,9 @@ internal static class FF7ToggleSwitch
         var availWidth = ImGui.GetContentRegionAvail().X;
         var switchWidth = TrackWidth * scale;
 
-        // Total row height depends on whether description is present
-        var hasDesc = !string.IsNullOrEmpty(description);
+        // Compact: title only, description goes to tooltip
         var titleH = ImGui.GetTextLineHeight();
-        var rowH = (hasDesc ? 38f : 26f) * scale;
+        var rowH = 22f * scale;
         var boxSize = new Vector2(availWidth, rowH);
 
         var hit = Hit.Area(id + "_row", boxSize);
@@ -89,7 +88,6 @@ internal static class FF7ToggleSwitch
         if (hover > 0.01f)
         {
             Paint.Fill(dl, origin, origin + boxSize, FF7RTheme.WithAlpha(FF7RTheme.Surface1, hover * 0.5f), 3f * scale);
-            Paint.Stroke(dl, origin, origin + boxSize, FF7RTheme.WithAlpha(FF7RTheme.BorderDim, hover * 0.4f), 3f * scale);
         }
 
         var changed = false;
@@ -99,21 +97,15 @@ internal static class FF7ToggleSwitch
             changed = true;
         }
 
-        // Draw Title & Description
-        var textLeft = origin.X + 8f * scale;
-        var textTop = hasDesc ? origin.Y + 4f * scale : origin.Y + (rowH - titleH) * 0.5f;
+        // Draw Title (single line, vertically centered)
+        var textLeft = origin.X + 6f * scale;
+        var textTop = origin.Y + (rowH - titleH) * 0.5f;
 
         var titleCol = value ? FF7RTheme.TextStrong : FF7RTheme.TextSecondary;
         dl.AddText(new Vector2(textLeft, textTop), Paint.Col(titleCol), title);
 
-        if (hasDesc)
-        {
-            var descTop = textTop + titleH + 1f * scale;
-            dl.AddText(new Vector2(textLeft, descTop), Paint.Col(FF7RTheme.TextMuted), description);
-        }
-
         // Draw Switch aligned to right
-        var switchPos = new Vector2(origin.X + availWidth - switchWidth - 8f * scale, origin.Y + (rowH - TrackHeight * scale) * 0.5f);
+        var switchPos = new Vector2(origin.X + availWidth - switchWidth - 6f * scale, origin.Y + (rowH - TrackHeight * scale) * 0.5f);
         ImGui.SetCursorScreenPos(switchPos);
         if (Draw(id, ref value, activeColor))
         {
@@ -121,11 +113,15 @@ internal static class FF7ToggleSwitch
         }
 
         // Advance cursor
-        ImGui.SetCursorScreenPos(new Vector2(origin.X, origin.Y + rowH + 4f * scale));
+        ImGui.SetCursorScreenPos(new Vector2(origin.X, origin.Y + rowH + 2f * scale));
 
-        if (hit.Hovered && !string.IsNullOrEmpty(tooltip))
+        // Tooltip: show description (if any) + explicit tooltip
+        if (hit.Hovered)
         {
-            ImGui.SetTooltip(tooltip);
+            var tip = "";
+            if (!string.IsNullOrEmpty(description)) tip = description;
+            if (!string.IsNullOrEmpty(tooltip)) tip = string.IsNullOrEmpty(tip) ? tooltip : $"{tip}\n{tooltip}";
+            if (!string.IsNullOrEmpty(tip)) ImGui.SetTooltip(tip);
         }
 
         return changed;

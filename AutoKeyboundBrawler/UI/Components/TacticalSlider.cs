@@ -7,8 +7,8 @@ namespace AutoKeyboundBrawler.UI.Components;
 
 internal static class TacticalSlider
 {
-    private const float HitHeight = 16f;
-    private const float TrackHeight = 3.5f;
+    private const float HitHeight = 12f;
+    private const float TrackHeight = 2.5f;
 
     public static bool Draw(string id, string label, ref int value, int min, int max, string unit = "ms")
     {
@@ -72,7 +72,7 @@ internal static class TacticalSlider
 
         // 4. Sleek Thumb / Knob
         var isEngaged = hit.Held || hit.Hovered;
-        var knobRadius = (hit.Held ? 5.5f : (hit.Hovered ? 5.0f : 4.0f)) * scale;
+        var knobRadius = (hit.Held ? 4.5f : (hit.Hovered ? 4.0f : 3.0f)) * scale;
 
         if (hover > 0.05f || hit.Held)
         {
@@ -85,7 +85,7 @@ internal static class TacticalSlider
         dl.AddCircle(new Vector2(knobCenterX, knobCenterY), knobRadius, Paint.Col(FF7RTheme.MakoCyan), 0, 1.4f * scale);
 
         // Advance cursor
-        var totalHeight = textHeight + 4f * scale + HitHeight * scale + 4f * scale;
+        var totalHeight = textHeight + 3f * scale + HitHeight * scale + 2f * scale;
         ImGui.SetCursorScreenPos(new Vector2(origin.X, origin.Y + totalHeight));
 
         return changed;

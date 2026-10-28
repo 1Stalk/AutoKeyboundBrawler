@@ -1,5 +1,4 @@
 using AutoKeyboundBrawler.Core;
-using AutoKeyboundBrawler.Data;
 using AutoKeyboundBrawler.UI.Components;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Interface.Utility;
@@ -16,16 +15,16 @@ public class MainWindow : Window, IDisposable
     private const ImGuiWindowFlags BaseFlags =
         ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse | ImGuiWindowFlags.NoCollapse;
 
-    private static readonly Vector2 DefaultSize = new(430, 485);
+    private static readonly Vector2 DefaultSize = new(280, 340);
     private static readonly WindowSizeConstraints CompactConstraints = new()
     {
-        MinimumSize = new Vector2(360, HeaderBar.Height),
+        MinimumSize = new Vector2(240, HeaderBar.Height),
         MaximumSize = new Vector2(float.MaxValue, HeaderBar.Height),
     };
     private static readonly WindowSizeConstraints ExpandedConstraints = new()
     {
-        MinimumSize = new Vector2(380, 420),
-        MaximumSize = new Vector2(620, 720),
+        MinimumSize = new Vector2(260, 280),
+        MaximumSize = new Vector2(360, 480),
     };
 
     private readonly Configuration _config;
@@ -37,7 +36,6 @@ public class MainWindow : Window, IDisposable
     private long _collapseTick;
     private bool _sizeDriven;
     private Vector2 _expandedSize = DefaultSize;
-    private int _selectedTab;
     private IDisposable? _chrome;
 
     public MainWindow(Configuration config, KTGAutomationManager automation)
@@ -144,129 +142,181 @@ public class MainWindow : Window, IDisposable
         HeaderBar.Draw(this, _automation, windowPos, windowSize.X, headerHeight, compact: false);
 
         // Body Content
-        var bodyTop = windowPos.Y + headerHeight + 8f * scale;
-        var bodyPaddingX = 12f * scale;
+        var bodyTop = windowPos.Y + headerHeight + 4f * scale;
+        var bodyPaddingX = 8f * scale;
         var contentWidth = windowSize.X - bodyPaddingX * 2f;
-        var bodyHeight = windowSize.Y - headerHeight - 16f * scale;
+        var bodyHeight = windowSize.Y - headerHeight - 8f * scale;
 
         if (bodyHeight < 10f) return;
 
         ImGui.SetCursorScreenPos(new Vector2(windowPos.X + bodyPaddingX, bodyTop));
 
         using (Motion.PushAlpha(MathF.Max(0.001f, 1f - _collapse)))
-        using (var bodyChild = ImRaii.Child("##akb_body", new Vector2(contentWidth, bodyHeight), false, ImGuiWindowFlags.NoScrollbar))
+        using (var bodyChild = ImRaii.Child("##akb_body", new Vector2(contentWidth, bodyHeight), false,
+            ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse))
         {
             if (!bodyChild) return;
 
-            // 1. Battle Telemetry Card (Live HUD)
-            BattleTelemetryCard.Draw(_automation);
-
-            // 2. Primary Automation Controls
-            using (TacticalCard.Begin())
-            {
-                var minigame = _config.MinigameAutoplay;
-                if (FF7ToggleSwitch.DrawRow("##minigame_solver", "Combat Typing Solver", "Humanized typing, shield detection & adds priority", ref minigame,
-                    FF7RTheme.MakoCyan, "Automatically solves enemy phrases letter-by-letter with humanized typing delays."))
-                {
-                    _config.SetMinigameAutoplay(minigame);
-                }
-
-                var autoLoop = _config.AutoLoopEnabled;
-                if (FF7ToggleSwitch.DrawRow("##afk_loop", "AFK Duty Loop Runner", "Auto-register, commence & exit results", ref autoLoop,
-                    FF7RTheme.AtbGold, "Automatically interacts with Registrar, confirms entry, commences duty, and exits results."))
-                {
-                    _config.SetAutoLoop(autoLoop);
-                }
-            }
-
-            // 3. Segmented Navigation Tabs
-            _selectedTab = SegmentedTabs.Draw("##akb_tabs", _selectedTab, ["⚡ SPEED TUNING", "🛡 COMBAT RULES"]);
-
-            if (_selectedTab == 0)
-            {
-                // Speed & Typing Tuning Tab
-                using (TacticalCard.Begin())
-                {
-                    var minDelay = _config.CharDelayMinMs;
-                    if (TacticalSlider.Draw("char_min", "Min Keystroke Delay", ref minDelay, 10, 150))
-                    {
-                        _config.CharDelayMinMs = minDelay;
-                        if (_config.CharDelayMaxMs < minDelay) _config.CharDelayMaxMs = minDelay;
-                        _config.Save();
-                    }
-
-                    var maxDelay = _config.CharDelayMaxMs;
-                    if (TacticalSlider.Draw("char_max", "Max Keystroke Delay", ref maxDelay, 15, 250))
-                    {
-                        _config.CharDelayMaxMs = Math.Max(_config.CharDelayMinMs, maxDelay);
-                        _config.Save();
-                    }
-
-                    var enterDelay = _config.SubmissionDelayMs;
-                    if (TacticalSlider.Draw("sub_delay", "Enter Submission Delay", ref enterDelay, 20, 300))
-                    {
-                        _config.SubmissionDelayMs = enterDelay;
-                        _config.Save();
-                    }
-
-                    var ignorePunct = _config.IgnorePunctuation;
-                    if (FF7ToggleSwitch.DrawRow("##ignore_punct", "Ignore Punctuation", "Auto-strip !, ?, ', - from phrases", ref ignorePunct,
-                        FF7RTheme.MakoCyan, "Automatically strips punctuation symbols to guarantee faster, error-free typing."))
-                    {
-                        _config.IgnorePunctuation = ignorePunct;
-                        _config.Save();
-                    }
-                }
-            }
-            else
-            {
-                // Combat Rules & Priorities Tab
-                using (TacticalCard.Begin())
-                {
-                    var stopPenalty = _config.StopOnPenaltyCast;
-                    if (FF7ToggleSwitch.DrawRow("##stop_penalty", "Red Keyboard Obstruction Halt", "Strictly pause typing on obstruction cast", ref stopPenalty,
-                        FF7RTheme.LimitRed, "Stops all typing simulation instantly when enemy casts Red Keyboard Obstruction to prevent death."))
-                    {
-                        _config.StopOnPenaltyCast = stopPenalty;
-                        _config.Save();
-                    }
-
-                    var prioAdds = _config.PrioritizeAdds;
-                    if (FF7ToggleSwitch.DrawRow("##prio_adds", "Prioritize Add Waves", "Focus add mobs before boss mechanics", ref prioAdds,
-                        FF7RTheme.MakoCyan, "Solves add mobs first to clear lethal room mechanics before switching to boss."))
-                    {
-                        _config.PrioritizeAdds = prioAdds;
-                        _config.Save();
-                    }
-
-                    var prioDefense = _config.PrioritizeDefense;
-                    if (FF7ToggleSwitch.DrawRow("##prio_defense", "Prioritize Defense Quotes", "Raise shield against tankbuster phrases", ref prioDefense,
-                        FF7RTheme.MakoCyan, "Immediately switches typing priority to defensive quotes when a tankbuster is imminent."))
-                    {
-                        _config.PrioritizeDefense = prioDefense;
-                        _config.Save();
-                    }
-
-                    var memoryMode = _config.MemoryModeObscured;
-                    if (FF7ToggleSwitch.DrawRow("##memory_mode", "Memory Mode (Obscured Words)", "Solve hidden/scrambled words from Lumina database", ref memoryMode,
-                        FF7RTheme.MakoCyan, "Reconstructs obscured or ??? words from the Lumina Excel database."))
-                    {
-                        _config.MemoryModeObscured = memoryMode;
-                        _config.Save();
-                    }
-                }
-            }
-
-            // 4. Subtle Tactical Footer
-            ImGui.Dummy(new Vector2(0, 4f * scale));
-            var footerStart = ImGui.GetCursorScreenPos();
             var dl = ImGui.GetWindowDrawList();
-            dl.AddLine(footerStart, new Vector2(footerStart.X + contentWidth, footerStart.Y), Paint.Col(FF7RTheme.Hairline));
 
-            var footerText = "/akb  •  v1.0.0";
-            var fSize = ImGui.CalcTextSize(footerText);
-            var fPos = new Vector2(footerStart.X + (contentWidth - fSize.X) * 0.5f, footerStart.Y + 6f * scale);
-            dl.AddText(fPos, Paint.Col(FF7RTheme.TextMuted), footerText);
+            // 1. Active Word Bar (compact replacement for BattleTelemetryCard)
+            DrawWordBar(dl, contentWidth, scale);
+
+            // 2. Main Toggles
+            var minigame = _config.MinigameAutoplay;
+            if (FF7ToggleSwitch.DrawRow("##minigame_solver", "Typing Solver", "Humanized typing, shield detection & adds priority", ref minigame,
+                FF7RTheme.MakoCyan, "Automatically solves enemy phrases letter-by-letter with humanized typing delays."))
+            {
+                _config.SetMinigameAutoplay(minigame);
+            }
+
+            var autoLoop = _config.AutoLoopEnabled;
+            if (FF7ToggleSwitch.DrawRow("##afk_loop", "AFK Loop", "Auto-register, commence & exit results", ref autoLoop,
+                FF7RTheme.AtbGold, "Automatically interacts with Registrar, confirms entry, commences duty, and exits results."))
+            {
+                _config.SetAutoLoop(autoLoop);
+            }
+
+            // 3. Section: SPEED
+            DrawSectionLabel(dl, "SPEED", contentWidth, scale);
+
+            var minDelay = _config.CharDelayMinMs;
+            if (TacticalSlider.Draw("char_min", "Min Keystroke Delay", ref minDelay, 10, 150))
+            {
+                _config.CharDelayMinMs = minDelay;
+                if (_config.CharDelayMaxMs < minDelay) _config.CharDelayMaxMs = minDelay;
+                _config.Save();
+            }
+
+            var maxDelay = _config.CharDelayMaxMs;
+            if (TacticalSlider.Draw("char_max", "Max Keystroke Delay", ref maxDelay, 15, 250))
+            {
+                _config.CharDelayMaxMs = Math.Max(_config.CharDelayMinMs, maxDelay);
+                _config.Save();
+            }
+
+            var enterDelay = _config.SubmissionDelayMs;
+            if (TacticalSlider.Draw("sub_delay", "Submit Delay", ref enterDelay, 20, 300))
+            {
+                _config.SubmissionDelayMs = enterDelay;
+                _config.Save();
+            }
+
+            var ignorePunct = _config.IgnorePunctuation;
+            if (FF7ToggleSwitch.DrawRow("##ignore_punct", "Ignore Punctuation", "Auto-strip !, ?, ', - from phrases", ref ignorePunct,
+                FF7RTheme.MakoCyan, "Automatically strips punctuation symbols to guarantee faster, error-free typing."))
+            {
+                _config.IgnorePunctuation = ignorePunct;
+                _config.Save();
+            }
+
+            // 4. Section: COMBAT
+            DrawSectionLabel(dl, "COMBAT", contentWidth, scale);
+
+            var stopPenalty = _config.StopOnPenaltyCast;
+            if (FF7ToggleSwitch.DrawRow("##stop_penalty", "Red Obstruction Halt", "Pause typing on obstruction cast", ref stopPenalty,
+                FF7RTheme.LimitRed, "Stops all typing simulation instantly when enemy casts Red Keyboard Obstruction to prevent death."))
+            {
+                _config.StopOnPenaltyCast = stopPenalty;
+                _config.Save();
+            }
+
+            var prioAdds = _config.PrioritizeAdds;
+            if (FF7ToggleSwitch.DrawRow("##prio_adds", "Prioritize Adds", "Focus add mobs before boss", ref prioAdds,
+                FF7RTheme.MakoCyan, "Solves add mobs first to clear lethal room mechanics before switching to boss."))
+            {
+                _config.PrioritizeAdds = prioAdds;
+                _config.Save();
+            }
+
+            var prioDefense = _config.PrioritizeDefense;
+            if (FF7ToggleSwitch.DrawRow("##prio_defense", "Prioritize Defense", "Raise shield against tankbusters", ref prioDefense,
+                FF7RTheme.MakoCyan, "Immediately switches typing priority to defensive quotes when a tankbuster is imminent."))
+            {
+                _config.PrioritizeDefense = prioDefense;
+                _config.Save();
+            }
+
+            var memoryMode = _config.MemoryModeObscured;
+            if (FF7ToggleSwitch.DrawRow("##memory_mode", "Memory Mode", "Solve hidden words from database", ref memoryMode,
+                FF7RTheme.MakoCyan, "Reconstructs obscured or ??? words from the Lumina Excel database."))
+            {
+                _config.MemoryModeObscured = memoryMode;
+                _config.Save();
+            }
         }
+    }
+
+    private void DrawWordBar(ImDrawListPtr dl, float contentWidth, float scale)
+    {
+        var origin = ImGui.GetCursorScreenPos();
+        var barH = 20f * scale;
+
+        var status = _automation.CurrentStatus;
+        var isTyping = _automation.IsTyping;
+        var isHalt = status.StartsWith("SAFETY") || status.Contains("Halt") || status.Contains("Obstruction");
+        var isDuty = _automation.CurrentPhase == EventPhase.InMinigame || status.Contains("In Combat");
+
+        var dotColor = isHalt ? FF7RTheme.LimitRed :
+                       isTyping ? FF7RTheme.MakoCyan :
+                       isDuty ? FF7RTheme.MakoCyanSoft :
+                       FF7RTheme.TextMuted;
+
+        // Status dot
+        var dotRadius = 2.5f * scale;
+        var dotCenter = new Vector2(origin.X + dotRadius + 2f * scale, origin.Y + barH * 0.5f);
+
+        if (isTyping || isHalt)
+        {
+            var pulse = Motion.Pulse(isHalt ? 400.0 : 800.0);
+            dl.AddCircleFilled(dotCenter, dotRadius + 2f * scale * pulse, Paint.Col(FF7RTheme.WithAlpha(dotColor, pulse * 0.35f)));
+        }
+        dl.AddCircleFilled(dotCenter, dotRadius, Paint.Col(dotColor));
+
+        // Active word
+        var activeWord = _automation.ActiveWord;
+        var hasWord = !string.IsNullOrEmpty(activeWord);
+        var displayWord = hasWord ? $"> \"{activeWord}\" <" : "> standby <";
+        var wordColor = isHalt ? FF7RTheme.LimitRedSoft :
+                        isTyping ? FF7RTheme.MakoCyanSoft :
+                        hasWord ? FF7RTheme.TextStrong :
+                        FF7RTheme.TextMuted;
+
+        var wordPos = new Vector2(dotCenter.X + dotRadius + 6f * scale, origin.Y + (barH - ImGui.GetTextLineHeight()) * 0.5f);
+        dl.AddText(wordPos, Paint.Col(wordColor), displayWord);
+
+        // Right-aligned mini status text
+        var statusLabel = isHalt ? "HALT" :
+                          isTyping ? "TYPING" :
+                          isDuty ? "COMBAT" :
+                          "IDLE";
+        var statusSize = ImGui.CalcTextSize(statusLabel);
+        var statusPos = new Vector2(origin.X + contentWidth - statusSize.X, origin.Y + (barH - statusSize.Y) * 0.5f);
+        dl.AddText(statusPos, Paint.Col(FF7RTheme.WithAlpha(dotColor, 0.7f)), statusLabel);
+
+        // Advance cursor
+        ImGui.SetCursorScreenPos(new Vector2(origin.X, origin.Y + barH + 4f * scale));
+    }
+
+    private static void DrawSectionLabel(ImDrawListPtr dl, string label, float contentWidth, float scale)
+    {
+        var origin = ImGui.GetCursorScreenPos();
+        var textH = ImGui.GetTextLineHeight();
+        var midY = origin.Y + textH * 0.5f;
+
+        // Muted label text
+        dl.AddText(origin, Paint.Col(FF7RTheme.TextMuted), label);
+
+        // Hairline extending to the right
+        var textW = ImGui.CalcTextSize(label).X;
+        var lineStart = new Vector2(origin.X + textW + 6f * scale, midY);
+        var lineEnd = new Vector2(origin.X + contentWidth, midY);
+        if (lineEnd.X > lineStart.X)
+        {
+            dl.AddLine(lineStart, lineEnd, Paint.Col(FF7RTheme.Hairline), 1f);
+        }
+
+        // Advance cursor
+        ImGui.SetCursorScreenPos(new Vector2(origin.X, origin.Y + textH + 4f * scale));
     }
 }

@@ -10,7 +10,7 @@ internal static class FF7RTheme
 {
     // FF7 Remake inspired color palette
     // Deep slate / gunmetal surfaces
-    public static readonly Vector4 WindowBg         = new(0.038f, 0.052f, 0.072f, 0.965f);
+    public static readonly Vector4 WindowBg         = new(0.038f, 0.052f, 0.072f, 0.94f);
     public static readonly Vector4 Surface0         = new(0.058f, 0.078f, 0.108f, 1.000f);
     public static readonly Vector4 Surface1         = new(0.078f, 0.108f, 0.148f, 1.000f);
     public static readonly Vector4 Surface2         = new(0.110f, 0.150f, 0.200f, 1.000f);
@@ -43,7 +43,7 @@ internal static class FF7RTheme
     public static readonly Vector4 Highlight        = new(1.000f, 1.000f, 1.000f, 0.120f);
 
     // Tactical Geometry - Sharp, modern FF7R bevels
-    public const float WindowRounding = 6f;
+    public const float WindowRounding = 8f;
     public const float CardRounding   = 4f;
     public const float FrameRounding  = 3f;
 
@@ -63,10 +63,10 @@ internal static class FF7RTheme
             .Push(ImGuiStyleVar.PopupRounding, CardRounding * scale)
             .Push(ImGuiStyleVar.PopupBorderSize, 1f)
             .Push(ImGuiStyleVar.FrameRounding, FrameRounding * scale)
-            .Push(ImGuiStyleVar.FramePadding, new Vector2(8f, 5f) * scale)
+            .Push(ImGuiStyleVar.FramePadding, new Vector2(6f, 3f) * scale)
             .Push(ImGuiStyleVar.FrameBorderSize, 1f)
-            .Push(ImGuiStyleVar.ItemSpacing, new Vector2(8f, 7f) * scale)
-            .Push(ImGuiStyleVar.ItemInnerSpacing, new Vector2(6f, 4f) * scale)
+            .Push(ImGuiStyleVar.ItemSpacing, new Vector2(6f, 4f) * scale)
+            .Push(ImGuiStyleVar.ItemInnerSpacing, new Vector2(4f, 2f) * scale)
             .Push(ImGuiStyleVar.ScrollbarSize, 7f * scale)
             .Push(ImGuiStyleVar.ScrollbarRounding, 4f * scale)
             .Push(ImGuiStyleVar.GrabRounding, 3f * scale)
