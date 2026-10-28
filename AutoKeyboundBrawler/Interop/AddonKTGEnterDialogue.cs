@@ -1,3 +1,4 @@
+using AutoKeyboundBrawler.Data;
 using ECommons;
 using ECommons.Automation;
 using ECommons.Automation.UIInput;
@@ -29,7 +30,7 @@ public static unsafe class AddonKTGEnterDialogue
 
         try
         {
-            // 1. In KTGEnterDialogue, Node 9 is the native "Register" AtkComponentButton
+            // 1. In KTGEnterDialogue, Node 9 is the native "Register" AtkComponentButton (language-independent)
             var button = addon->GetComponentButtonById(9);
             if (button != null && button->IsEnabled)
             {
@@ -45,7 +46,7 @@ public static unsafe class AddonKTGEnterDialogue
 
         try
         {
-            // 2. Scan component nodes for any button containing "Register"
+            // 2. Scan component nodes for any button containing localized "Register" text
             for (var i = 0; i < addon->UldManager.NodeListCount; i++)
             {
                 var node = addon->UldManager.NodeList[i];
@@ -60,7 +61,7 @@ public static unsafe class AddonKTGEnterDialogue
                         if (child != null && child->Type == NodeType.Text)
                         {
                             var text = GUINodeUtils.GetNodeText(child);
-                            if (!string.IsNullOrEmpty(text) && text.Contains("Register", StringComparison.OrdinalIgnoreCase))
+                            if (!string.IsNullOrEmpty(text) && KTGLocalizationRegistry.IsRegisterButtonText(text))
                             {
                                 var btn = (AtkComponentButton*)compNode->Component;
                                 if (btn != null && btn->IsEnabled)

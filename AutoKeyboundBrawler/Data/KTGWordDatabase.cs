@@ -1,4 +1,6 @@
+using Dalamud.Game;
 using Dalamud.Plugin.Services;
+using ECommons.DalamudServices;
 using Lumina.Excel.Sheets;
 using System;
 using System.Collections.Generic;
@@ -12,6 +14,9 @@ public class WordEntry
     public string Original { get; init; } = string.Empty;
     public string Normalized { get; init; } = string.Empty;
     public string Stripped { get; init; } = string.Empty;
+    public string Reading { get; init; } = string.Empty;
+    public bool IsDefense { get; init; }
+    public bool IsCactuar { get; init; }
 }
 
 public static class KTGWordDatabase
@@ -19,63 +24,137 @@ public static class KTGWordDatabase
     private static readonly List<WordEntry> Entries = [];
     private static readonly Dictionary<string, WordEntry> ByExactMatch = new(StringComparer.OrdinalIgnoreCase);
     private static readonly Dictionary<string, WordEntry> ByStrippedMatch = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly Dictionary<uint, WordEntry> ByRowId = [];
 
     public static bool IsLoaded { get; private set; }
     public static int Count => Entries.Count;
+    public static ClientLanguage CurrentLanguage { get; private set; } = ClientLanguage.English;
 
-    public static bool Load(IDataManager dataManager, IPluginLog? log = null)
+    public static bool Load(IDataManager dataManager, IPluginLog? log = null, ClientLanguage? forcedLanguage = null)
     {
-        if (IsLoaded && Entries.Count > 0)
+        var targetLang = forcedLanguage ?? Svc.ClientState.ClientLanguage;
+        if (IsLoaded && Entries.Count > 0 && CurrentLanguage == targetLang)
         {
             return true;
         }
 
         try
         {
-            var sheet = dataManager.GetExcelSheet<KTGTypeWordTextData>();
+            // 1. Get sheet for client's active language
+            var sheet = dataManager.GetExcelSheet<KTGTypeWordTextData>(targetLang) ??
+                        dataManager.GetExcelSheet<KTGTypeWordTextData>();
+
             if (sheet == null)
             {
-                log?.Error("[KTGWordDatabase] Failed to open Excel sheet KTGTypeWordTextData.");
+                log?.Error($"[KTGWordDatabase] Failed to open Excel sheet KTGTypeWordTextData for language {targetLang}.");
                 return false;
             }
+
+            // 2. Also open English sheet to reliably establish defense and cactuar flags across all languages
+            var englishSheet = dataManager.GetExcelSheet<KTGTypeWordTextData>(ClientLanguage.English);
 
             Entries.Clear();
             ByExactMatch.Clear();
             ByStrippedMatch.Clear();
+            ByRowId.Clear();
 
             foreach (var row in sheet)
             {
-                var text = row.Unknown0.ToString()?.Trim() ?? string.Empty;
-                if (string.IsNullOrWhiteSpace(text))
+                var text = row.Unknown0.ExtractText()?.Trim() ?? string.Empty;
+                var reading = row.Unknown1.ExtractText()?.Trim() ?? string.Empty;
+
+                if (string.IsNullOrWhiteSpace(text) && string.IsNullOrWhiteSpace(reading))
                 {
                     continue;
                 }
 
+                // If text is blank but reading exists (common in Japanese furigana), use reading as text
+                if (string.IsNullOrWhiteSpace(text))
+                {
+                    text = reading;
+                }
+
                 var normalized = text.ToLowerInvariant();
                 var stripped = StripPunctuation(normalized);
+
+                // Compute defense flag based on English sheet metadata
+                var isDefense = false;
+                var isCactuar = KTGLocalizationRegistry.CactuarRowIds.Contains(row.RowId) ||
+                                KTGLocalizationRegistry.IsCactuarPrompt(text);
+
+                if (englishSheet != null)
+                {
+                    try
+                    {
+                        var enRow = englishSheet.GetRow(row.RowId);
+                        var enText = enRow.Unknown0.ExtractText()?.Trim() ?? string.Empty;
+                        var lowerEn = enText.ToLowerInvariant();
+                        var enWords = enText.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+
+                        if (lowerEn.Contains("defense") ||
+                            lowerEn.Contains("defend") ||
+                            lowerEn.Contains("barrier") ||
+                            lowerEn.Contains("shield") ||
+                            lowerEn.Contains("protect") ||
+                            enWords.Length >= 3)
+                        {
+                            isDefense = true;
+                        }
+
+                        if (!isCactuar && (lowerEn.Contains("cactuar") || lowerEn.Contains("needle")))
+                        {
+                            isCactuar = true;
+                        }
+                    }
+                    catch
+                    {
+                        // Fallback to local text check
+                        isDefense = KTGLocalizationRegistry.ContainsDefenseKeyword(text);
+                    }
+                }
+                else
+                {
+                    isDefense = KTGLocalizationRegistry.ContainsDefenseKeyword(text);
+                }
 
                 var entry = new WordEntry
                 {
                     RowId = row.RowId,
                     Original = text,
                     Normalized = normalized,
-                    Stripped = stripped
+                    Stripped = stripped,
+                    Reading = reading,
+                    IsDefense = isDefense,
+                    IsCactuar = isCactuar
                 };
 
                 Entries.Add(entry);
+                ByRowId.TryAdd(entry.RowId, entry);
                 ByExactMatch.TryAdd(normalized, entry);
                 ByStrippedMatch.TryAdd(stripped, entry);
+
+                if (!string.IsNullOrWhiteSpace(reading))
+                {
+                    ByExactMatch.TryAdd(reading.ToLowerInvariant(), entry);
+                    ByStrippedMatch.TryAdd(StripPunctuation(reading.ToLowerInvariant()), entry);
+                }
             }
 
+            CurrentLanguage = targetLang;
             IsLoaded = true;
-            log?.Information($"[KTGWordDatabase] Successfully loaded {Entries.Count} words from KTGTypeWordTextData.");
+            log?.Information($"[KTGWordDatabase] Successfully loaded {Entries.Count} words for language {CurrentLanguage}.");
             return true;
         }
         catch (Exception ex)
         {
-            log?.Error(ex, "[KTGWordDatabase] Error while loading KTGTypeWordTextData.");
+            log?.Error(ex, $"[KTGWordDatabase] Error while loading KTGTypeWordTextData for language {targetLang}.");
             return false;
         }
+    }
+
+    public static WordEntry? GetByRowId(uint rowId)
+    {
+        return ByRowId.TryGetValue(rowId, out var entry) ? entry : null;
     }
 
     /// <summary>
@@ -125,4 +204,3 @@ public static class KTGWordDatabase
         return null;
     }
 }
-

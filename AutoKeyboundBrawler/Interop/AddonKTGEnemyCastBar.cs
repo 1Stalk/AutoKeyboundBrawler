@@ -1,3 +1,4 @@
+using AutoKeyboundBrawler.Data;
 using ECommons;
 using ECommons.DalamudServices;
 using FFXIVClientStructs.FFXIV.Component.GUI;
@@ -97,7 +98,6 @@ public static unsafe class AddonKTGEnemyCastBar
                     {
                         text = text.Trim();
                         if (string.Equals(text, "Interrupted!", StringComparison.OrdinalIgnoreCase)) continue;
-
                         if (text.Length > 2 && text.Any(char.IsLetter))
                         {
                             casts.Add(new KTGActiveCast((int)node->NodeId, text));
@@ -113,14 +113,11 @@ public static unsafe class AddonKTGEnemyCastBar
     /// <summary>
     /// Checks if a spell name corresponds to a Cactuar Needles cast:
     /// e.g. "??? Needles", "1,000 Needles", "10,000 Needles", "Needles", "Countless Needles", etc.
+    /// Supports all client localizations via KTGLocalizationRegistry.
     /// </summary>
     public static bool IsNeedlesSpell(string? spellName)
     {
-        if (string.IsNullOrWhiteSpace(spellName)) return false;
-        return spellName.Contains("needle", StringComparison.OrdinalIgnoreCase) ||
-               spellName.Contains("はり") ||
-               spellName.Contains("nadel", StringComparison.OrdinalIgnoreCase) ||
-               spellName.Contains("aiguille", StringComparison.OrdinalIgnoreCase);
+        return KTGLocalizationRegistry.IsNeedlesSpell(spellName);
     }
 
     public static bool HasActiveNeedlesCast(out KTGActiveCast? needlesCast)
@@ -132,41 +129,36 @@ public static unsafe class AddonKTGEnemyCastBar
 
     /// <summary>
     /// Checks if a spell name or action ID corresponds to the actual Halt casts:
-    /// - Dynamic Sensory Jammer
-    /// - Cursed Gaze
+    /// - Dynamic Sensory Jammer (ID 49702)
+    /// - Cursed Gaze (ID 49529)
+    /// Supports all client localizations via KTGLocalizationRegistry.
     /// </summary>
     public static bool IsHaltAvoidSpell(string? spellName, uint actionId = 0)
     {
-        if (actionId is 49702 or 49529 or 21396 or 17407 or 8342 or 8341 or 7354 or 7353 or 32448 or 512)
-        {
-            return true;
-        }
-
-        if (string.IsNullOrWhiteSpace(spellName)) return false;
-
-        return spellName.Contains("Dynamic Sensory Jammer", StringComparison.OrdinalIgnoreCase) ||
-               spellName.Contains("Cursed Gaze", StringComparison.OrdinalIgnoreCase);
+        return KTGLocalizationRegistry.IsHaltSpell(spellName, actionId);
     }
 
     /// <summary>
     /// Checks on-screen text banners (_ScreenText or KTGHudLog) for the "Inputs re-enabled!" notification.
+    /// Supports all client localizations via KTGLocalizationRegistry.
     /// </summary>
     public static bool IsInputsReEnabledOnScreen()
     {
-        return CheckAddonForText(ScreenTextAddonName, "Inputs re-enabled") ||
-               CheckAddonForText(HudLogAddonName, "Inputs re-enabled");
+        return CheckAddonForPredicate(ScreenTextAddonName, KTGLocalizationRegistry.MatchesInputsReEnabled) ||
+               CheckAddonForPredicate(HudLogAddonName, KTGLocalizationRegistry.MatchesInputsReEnabled);
     }
 
     /// <summary>
     /// Checks on-screen text banners (_ScreenText or KTGHudLog) for the "Inputs disabled!" notification.
+    /// Supports all client localizations via KTGLocalizationRegistry.
     /// </summary>
     public static bool IsInputsDisabledOnScreen()
     {
-        return CheckAddonForText(ScreenTextAddonName, "Inputs disabled") ||
-               CheckAddonForText(HudLogAddonName, "Inputs disabled");
+        return CheckAddonForPredicate(ScreenTextAddonName, KTGLocalizationRegistry.MatchesInputsDisabled) ||
+               CheckAddonForPredicate(HudLogAddonName, KTGLocalizationRegistry.MatchesInputsDisabled);
     }
 
-    private static bool CheckAddonForText(string addonName, string targetText)
+    private static bool CheckAddonForPredicate(string addonName, Func<string, bool> predicate)
     {
         if (!GenericHelpers.TryGetAddonByName(addonName, out AtkUnitBase* addon) ||
             addon == null ||
@@ -184,7 +176,7 @@ public static unsafe class AddonKTGEnemyCastBar
             if (node->Type == NodeType.Text)
             {
                 var text = GUINodeUtils.GetNodeText(node);
-                if (!string.IsNullOrEmpty(text) && text.Contains(targetText, StringComparison.OrdinalIgnoreCase))
+                if (!string.IsNullOrEmpty(text) && predicate(text))
                 {
                     return true;
                 }
@@ -200,7 +192,7 @@ public static unsafe class AddonKTGEnemyCastBar
                         if (child != null && child->Type == NodeType.Text && GUINodeUtils.IsNodeActuallyVisible(child, node))
                         {
                             var text = GUINodeUtils.GetNodeText(child);
-                            if (!string.IsNullOrEmpty(text) && text.Contains(targetText, StringComparison.OrdinalIgnoreCase))
+                            if (!string.IsNullOrEmpty(text) && predicate(text))
                             {
                                 return true;
                             }

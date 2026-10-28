@@ -122,8 +122,9 @@ public static unsafe class KTGStateReader
     /// <summary>
     /// Checks if a given target is a true Defensive Sentence / Player Shield Prompt:
     /// - SlotId == 2 is STRICTLY the Boss and can NEVER be a player defensive prompt.
-    /// - Contains explicit defensive keywords ("defense", "defend", "barrier", "shield", "protect")
-    /// - OR has a full quote/sentence structure (3 or more words, e.g. "Just doing my job. Nothing more.", "Listen to the Cries of the Planet")
+    /// - Checks KTGWordDatabase cross-language defense flag (1:1 row sync with English sheet).
+    /// - Localized defense keywords via KTGLocalizationRegistry.
+    /// - Full sentence structure (3 or more words for EN, DE, FR).
     /// Never matches single-word or 2-word adds like "whisper", "Tifa", "SOLDIER", "Cloud Jr.".
     /// </summary>
     public static bool IsDefenseSentence(string word, int slotId = -1)
@@ -136,21 +137,21 @@ public static unsafe class KTGStateReader
 
         if (string.IsNullOrWhiteSpace(word)) return false;
 
-        var lower = word.ToLowerInvariant();
-
-        // 1. Explicit defense keywords (e.g. "Iron Defense", "precision defense focus", "Lustrous Shield", "Barrier")
-        if (lower.Contains("defense") ||
-            lower.Contains("defend") ||
-            lower.Contains("barrier") ||
-            lower.Contains("shield") ||
-            lower.Contains("protect"))
+        // 1. Check loaded database entry (which resolved defense cross-language via English sheet row matching)
+        var match = KTGWordDatabase.FindMatch(word);
+        if (match != null && match.IsDefense)
         {
             return true;
         }
 
+        // 2. Explicit defense keywords via KTGLocalizationRegistry (EN, DE, FR, JA)
+        if (KTGLocalizationRegistry.ContainsDefenseKeyword(word))
+        {
+            return true;
+        }
+
+        // 3. Full quote / sentence structure (3 or more words for space-separated languages)
         var words = word.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        // 2. Full English quote / sentence structure (3 or more words)
-        // (e.g. "Just doing my job. Nothing more.", "Listen to the Cries of the Planet", "Feels like we're flying high these days!")
         if (words.Length >= 3)
         {
             return true;
@@ -161,15 +162,19 @@ public static unsafe class KTGStateReader
 
     /// <summary>
     /// Checks if a prompt word corresponds to a Cactuar / Sabotender mob.
+    /// Supports all client localizations via KTGWordDatabase and KTGLocalizationRegistry.
     /// </summary>
     public static bool IsCactuarWord(string word)
     {
         if (string.IsNullOrWhiteSpace(word)) return false;
-        var lower = word.ToLowerInvariant();
-        return lower.Contains("cactuar") ||
-               lower.Contains("sabotender") ||
-               lower.Contains("needle") ||
-               lower.Contains("はり");
+
+        var match = KTGWordDatabase.FindMatch(word);
+        if (match != null && match.IsCactuar)
+        {
+            return true;
+        }
+
+        return KTGLocalizationRegistry.IsCactuarPrompt(word);
     }
 
     /// <summary>

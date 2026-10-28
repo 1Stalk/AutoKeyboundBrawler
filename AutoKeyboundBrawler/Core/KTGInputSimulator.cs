@@ -2,28 +2,50 @@ using FFXIVClientStructs.FFXIV.Client.System.Input;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 
 namespace AutoKeyboundBrawler.Core;
 
 public unsafe class KTGInputSimulator
 {
+    public readonly struct KeyAction
+    {
+        public readonly SeVirtualKey VirtualKey;
+        public readonly char Character;
+        public readonly bool IsUnicode;
+
+        public KeyAction(SeVirtualKey vk)
+        {
+            VirtualKey = vk;
+            Character = '\0';
+            IsUnicode = false;
+        }
+
+        public KeyAction(char c)
+        {
+            VirtualKey = SeVirtualKey.NO_KEY;
+            Character = c;
+            IsUnicode = true;
+        }
+    }
+
     private readonly Random _random = new();
-    private readonly Queue<SeVirtualKey> _pendingKeys = new();
+    private readonly Queue<KeyAction> _pendingActions = new();
     private readonly Stopwatch _stepStopwatch = new();
 
     private long _nextDelayMs;
     private bool _isSubmittingWord;
 
-    public bool IsTyping => _pendingKeys.Count > 0 || _isSubmittingWord;
+    public bool IsTyping => _pendingActions.Count > 0 || _isSubmittingWord;
     public string CurrentWord { get; private set; } = string.Empty;
-    public int RemainingChars => _pendingKeys.Count;
+    public int RemainingChars => _pendingActions.Count;
 
     public bool JustSubmitted { get; set; }
     public string LastSubmittedWord { get; private set; } = string.Empty;
 
     public void EnqueueWord(string word, Configuration config)
     {
-        _pendingKeys.Clear();
+        _pendingActions.Clear();
         CurrentWord = word;
         _isSubmittingWord = false;
         JustSubmitted = false;
@@ -36,12 +58,17 @@ public unsafe class KTGInputSimulator
         {
             if (TryCharToVirtualKey(ch, out var vk))
             {
-                _pendingKeys.Enqueue(vk);
+                _pendingActions.Enqueue(new KeyAction(vk));
+            }
+            else
+            {
+                // Accented characters (ä, ö, ü, ß, é, à, etc.) or any non-ASCII character
+                _pendingActions.Enqueue(new KeyAction(ch));
             }
         }
 
         // Always end with Enter to submit the word
-        _pendingKeys.Enqueue(SeVirtualKey.RETURN);
+        _pendingActions.Enqueue(new KeyAction(SeVirtualKey.RETURN));
 
         _nextDelayMs = GetRandomCharDelay(config);
         _stepStopwatch.Restart();
@@ -49,7 +76,7 @@ public unsafe class KTGInputSimulator
 
     public void Clear()
     {
-        _pendingKeys.Clear();
+        _pendingActions.Clear();
         CurrentWord = string.Empty;
         _isSubmittingWord = false;
         _stepStopwatch.Reset();
@@ -67,31 +94,38 @@ public unsafe class KTGInputSimulator
             return;
         }
 
-        if (_pendingKeys.Count == 0)
+        if (_pendingActions.Count == 0)
         {
             CurrentWord = string.Empty;
             _isSubmittingWord = false;
             return;
         }
 
-        var key = _pendingKeys.Dequeue();
-        SendKey(key);
+        var action = _pendingActions.Dequeue();
+        if (action.IsUnicode)
+        {
+            SendUnicodeChar(action.Character);
+        }
+        else
+        {
+            SendKey(action.VirtualKey);
+        }
 
-        if (key == SeVirtualKey.RETURN)
+        if (!action.IsUnicode && action.VirtualKey == SeVirtualKey.RETURN)
         {
             JustSubmitted = true;
             LastSubmittedWord = CurrentWord;
             CurrentWord = string.Empty;
             _isSubmittingWord = false;
-            _pendingKeys.Clear();
+            _pendingActions.Clear();
             _stepStopwatch.Restart();
             return;
         }
 
-        if (_pendingKeys.Count > 0)
+        if (_pendingActions.Count > 0)
         {
-            var nextKey = _pendingKeys.Peek();
-            _nextDelayMs = nextKey == SeVirtualKey.RETURN
+            var nextAction = _pendingActions.Peek();
+            _nextDelayMs = (!nextAction.IsUnicode && nextAction.VirtualKey == SeVirtualKey.RETURN)
                 ? Math.Max(30, config.SubmissionDelayMs)
                 : GetRandomCharDelay(config);
         }
@@ -180,6 +214,71 @@ public unsafe class KTGInputSimulator
         PInvoke.keybd_event(vk, 0, KEYEVENTF_KEYUP, 0);
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    private struct INPUT
+    {
+        public uint type;
+        public InputUnion u;
+    }
+
+    [StructLayout(LayoutKind.Explicit)]
+    private struct InputUnion
+    {
+        [FieldOffset(0)]
+        public KEYBDINPUT ki;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct KEYBDINPUT
+    {
+        public ushort wVk;
+        public ushort wScan;
+        public uint dwFlags;
+        public uint time;
+        public UIntPtr dwExtraInfo;
+    }
+
+    private const uint INPUT_KEYBOARD = 1;
+    private const uint KEYEVENTF_KEYUP = 0x0002;
+    private const uint KEYEVENTF_UNICODE = 0x0004;
+
+    public static void SendUnicodeChar(char c)
+    {
+        var inputs = new INPUT[2];
+        inputs[0] = new INPUT
+        {
+            type = INPUT_KEYBOARD,
+            u = new InputUnion
+            {
+                ki = new KEYBDINPUT
+                {
+                    wVk = 0,
+                    wScan = c,
+                    dwFlags = KEYEVENTF_UNICODE,
+                    time = 0,
+                    dwExtraInfo = UIntPtr.Zero
+                }
+            }
+        };
+        inputs[1] = new INPUT
+        {
+            type = INPUT_KEYBOARD,
+            u = new InputUnion
+            {
+                ki = new KEYBDINPUT
+                {
+                    wVk = 0,
+                    wScan = c,
+                    dwFlags = KEYEVENTF_UNICODE | KEYEVENTF_KEYUP,
+                    time = 0,
+                    dwExtraInfo = UIntPtr.Zero
+                }
+            }
+        };
+
+        PInvoke.SendInput((uint)inputs.Length, inputs, sizeof(INPUT));
+    }
+
     private static bool TryCharToVirtualKey(char c, out SeVirtualKey key)
     {
         if (c is >= 'a' and <= 'z')
@@ -246,7 +345,10 @@ public unsafe class KTGInputSimulator
 
     private static class PInvoke
     {
-        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        [DllImport("user32.dll")]
         public static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, int dwExtraInfo);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        public static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
     }
 }

@@ -1,3 +1,4 @@
+using AutoKeyboundBrawler.Data;
 using AutoKeyboundBrawler.Interop;
 using Dalamud.Plugin.Services;
 using ECommons.DalamudServices;
@@ -56,6 +57,11 @@ public class KTGAutomationManager
                 _simulator.Clear();
             }
             return;
+        }
+
+        if (!KTGWordDatabase.IsLoaded || KTGWordDatabase.CurrentLanguage != Svc.ClientState.ClientLanguage)
+        {
+            KTGWordDatabase.Load(Svc.Data, _log);
         }
 
         var phase = KTGStateReader.GetCurrentPhase();
@@ -349,8 +355,7 @@ public class KTGAutomationManager
 
         // Safely clear target if it is Keybound Registrar so we don't hold lock on the NPC while in queue
         if (Svc.Targets.Target != null &&
-            (Svc.Targets.Target.BaseId == 1058751 ||
-             Svc.Targets.Target.Name.TextValue.Contains("Keybound Registrar", StringComparison.OrdinalIgnoreCase)))
+            KTGLocalizationRegistry.IsRegistrar(Svc.Targets.Target.BaseId, Svc.Targets.Target.Name.TextValue))
         {
             Svc.Targets.Target = null;
         }
@@ -439,8 +444,7 @@ public class KTGAutomationManager
 
         // Fast path: Current target is already Keybound Registrar
         if (Svc.Targets.Target != null &&
-            (Svc.Targets.Target.BaseId == 1058751 ||
-             Svc.Targets.Target.Name.TextValue.Contains("Keybound Registrar", StringComparison.OrdinalIgnoreCase)))
+            KTGLocalizationRegistry.IsRegistrar(Svc.Targets.Target.BaseId, Svc.Targets.Target.Name.TextValue))
         {
             registrar = Svc.Targets.Target;
         }
@@ -451,8 +455,7 @@ public class KTGAutomationManager
             {
                 if (obj == null) continue;
 
-                if (obj.BaseId == 1058751 ||
-                    obj.Name.TextValue.Contains("Keybound Registrar", StringComparison.OrdinalIgnoreCase))
+                if (KTGLocalizationRegistry.IsRegistrar(obj.BaseId, obj.Name.TextValue))
                 {
                     registrar = obj;
                     break;
