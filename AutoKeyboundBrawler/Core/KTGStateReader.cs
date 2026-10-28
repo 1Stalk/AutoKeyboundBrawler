@@ -1,5 +1,9 @@
 using AutoKeyboundBrawler.Data;
 using AutoKeyboundBrawler.Interop;
+using Dalamud.Game.ClientState.Conditions;
+using ECommons.DalamudServices;
+using FFXIVClientStructs.FFXIV.Client.Enums;
+using FFXIVClientStructs.FFXIV.Client.Game.UI;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -10,6 +14,7 @@ public enum EventPhase
 {
     None,
     InSquare,
+    InQueue,
     Registering,
     Commencing,
     InMinigame,
@@ -27,6 +32,56 @@ public static unsafe class KTGStateReader
 {
     private static readonly Dictionary<int, CachedTarget> _targetCache = new();
 
+    /// <summary>
+    /// Checks if the player is currently in a Duty Finder / Content matching queue.
+    /// Evaluates native ContentsFinder queue state and timestamps, as well as Dalamud condition flags.
+    /// </summary>
+    public static bool IsQueuedForDuty()
+    {
+        // 1. Check native FFXIV ContentsFinder Queue State
+        try
+        {
+            var cf = ContentsFinder.Instance();
+            if (cf != null)
+            {
+                var state = cf->QueueInfo.QueueState;
+                if (state is ContentsFinderQueueState.Pending
+                         or ContentsFinderQueueState.Queued
+                         or ContentsFinderQueueState.Ready
+                         or ContentsFinderQueueState.Accepted)
+                {
+                    return true;
+                }
+
+                if (cf->QueueInfo.EnteredQueueTimestamp > 0 &&
+                    state != ContentsFinderQueueState.None &&
+                    state != ContentsFinderQueueState.InContent)
+                {
+                    return true;
+                }
+            }
+        }
+        catch
+        {
+            // Safety fallback if native struct access throws
+        }
+
+        // 2. Check Dalamud Condition flags
+        if (Svc.Condition[ConditionFlag.InDutyQueue] ||
+            Svc.Condition[ConditionFlag.WaitingForDuty] ||
+            Svc.Condition[ConditionFlag.WaitingForDutyFinder] ||
+            Svc.Condition[ConditionFlag.WaitingForRaceOrMatch] ||
+            Svc.Condition[ConditionFlag.RegisteringForRaceOrMatch] ||
+            Svc.Condition[ConditionFlag.WaitingForTripleTriadMatch] ||
+            Svc.Condition[ConditionFlag.WaitingForTripleTriadMatch83] ||
+            Svc.Condition[ConditionFlag.RegisteringForTripleTriadMatch])
+        {
+            return true;
+        }
+
+        return false;
+    }
+
     public static EventPhase GetCurrentPhase()
     {
         if (AddonKTGResult.TryGet(out _))
@@ -42,6 +97,11 @@ public static unsafe class KTGStateReader
         if (KTGSafetyGuard.IsInEventDuty)
         {
             return EventPhase.InMinigame;
+        }
+
+        if (IsQueuedForDuty())
+        {
+            return EventPhase.InQueue;
         }
 
         if (AddonKTGEnterDialogue.TryGet(out _))

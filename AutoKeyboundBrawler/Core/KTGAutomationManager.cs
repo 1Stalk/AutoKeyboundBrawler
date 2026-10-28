@@ -14,6 +14,7 @@ public class KTGAutomationManager
     private DateTime _lastActionTime = DateTime.MinValue;
     private DateTime _lastSubmissionTime = DateTime.MinValue;
     private DateTime _lastPreemptTime = DateTime.MinValue;
+    private DateTime _lastRegistrationTime = DateTime.MinValue;
 
     private string _lastSubmittedWord = string.Empty;
     private string _lastTargetWord = string.Empty;
@@ -58,6 +59,10 @@ public class KTGAutomationManager
 
             case EventPhase.Commencing:
                 HandleCommencingPhase();
+                break;
+
+            case EventPhase.InQueue:
+                HandleInQueuePhase();
                 break;
 
             case EventPhase.Registering:
@@ -217,8 +222,29 @@ public class KTGAutomationManager
         }
     }
 
+    private void HandleInQueuePhase()
+    {
+        CurrentStatus = "In Keybound Square (Queued for match...)";
+        if (_simulator.IsTyping) _simulator.Clear();
+        KTGStateReader.ClearCache();
+
+        // Safely clear target if it is Keybound Registrar so we don't hold lock on the NPC while in queue
+        if (Svc.Targets.Target != null &&
+            (Svc.Targets.Target.BaseId == 1058751 ||
+             Svc.Targets.Target.Name.TextValue.Contains("Keybound Registrar", StringComparison.OrdinalIgnoreCase)))
+        {
+            Svc.Targets.Target = null;
+        }
+    }
+
     private void HandleRegisteringPhase()
     {
+        if (KTGStateReader.IsQueuedForDuty())
+        {
+            CurrentStatus = "In Keybound Square (Queued for match...)";
+            return;
+        }
+
         CurrentStatus = "Registration Window Open";
         if (_simulator.IsTyping) _simulator.Clear();
         KTGStateReader.ClearCache();
@@ -229,6 +255,7 @@ public class KTGAutomationManager
             if (AddonKTGEnterDialogue.ConfirmRegistration())
             {
                 _lastActionTime = DateTime.UtcNow;
+                _lastRegistrationTime = DateTime.UtcNow;
             }
         }
     }
@@ -239,15 +266,22 @@ public class KTGAutomationManager
         KTGStateReader.ClearCache();
 
         // 1. If currently queued in Duty Finder, do NOT talk to the NPC!
-        if (Svc.Condition[Dalamud.Game.ClientState.Conditions.ConditionFlag.WaitingForDutyFinder])
+        if (KTGStateReader.IsQueuedForDuty())
         {
             CurrentStatus = "In Keybound Square (Queued for match...)";
             return;
         }
 
+        // 2. Cooldown debounce after registering (gives server time to acknowledge queue)
+        if ((DateTime.UtcNow - _lastRegistrationTime).TotalSeconds < 8.0)
+        {
+            CurrentStatus = "In Keybound Square (Waiting for queue confirmation...)";
+            return;
+        }
+
         CurrentStatus = "In Keybound Square";
 
-        // 2. Advance NPC talk dialog if open
+        // 3. Advance NPC talk dialog if open
         unsafe
         {
             if (ECommons.GenericHelpers.TryGetAddonByName("Talk", out FFXIVClientStructs.FFXIV.Component.GUI.AtkUnitBase* talk) &&
@@ -345,6 +379,7 @@ public class KTGAutomationManager
         _simulator.Clear();
         _lastTargetSlotId = -1;
         _lastPreemptTime = DateTime.MinValue;
+        _lastRegistrationTime = DateTime.MinValue;
         KTGStateReader.ClearCache();
         CurrentStatus = "Reset";
     }

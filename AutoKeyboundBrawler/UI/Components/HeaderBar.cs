@@ -68,7 +68,7 @@ internal static class HeaderBar
         var isTyping = automation.IsTyping;
         var isHalt = status.StartsWith("SAFETY") || status.Contains("Halt") || status.Contains("Obstruction");
         var isDuty = automation.CurrentPhase == EventPhase.InMinigame || status.Contains("In Combat");
-        var isQueue = status.Contains("Queued") || status.Contains("Commencing") || status.Contains("Registration");
+        var isQueue = automation.CurrentPhase is EventPhase.InQueue or EventPhase.Commencing or EventPhase.Registering || status.Contains("Queued") || status.Contains("Commencing") || status.Contains("Registration");
 
         var dotColor = isHalt ? FF7RTheme.LimitRed :
                        isTyping ? FF7RTheme.MakoCyan :
@@ -100,7 +100,7 @@ internal static class HeaderBar
         var isTyping = automation.IsTyping;
         var isHalt = status.StartsWith("SAFETY") || status.Contains("Halt") || status.Contains("Obstruction");
         var isDuty = automation.CurrentPhase == EventPhase.InMinigame || status.Contains("In Combat");
-        var isQueue = status.Contains("Queued") || status.Contains("Commencing") || status.Contains("Registration");
+        var isQueue = automation.CurrentPhase is EventPhase.InQueue or EventPhase.Commencing or EventPhase.Registering || status.Contains("Queued") || status.Contains("Commencing") || status.Contains("Registration");
 
         var badgeText = isHalt ? "HALTED" :
                         isTyping ? "TYPING" :
