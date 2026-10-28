@@ -8,6 +8,8 @@ Type less. Win more.
 
 Automated typing solver for the Keybound Brawler event in FFXIV.
 
+https://github.com/user-attachments/assets/91bab7d2-9797-4ddb-95b3-ba4bafde052e
+
 </div>
 <!-- Repository Header End -->
 
