@@ -1,0 +1,86 @@
+name: Build and Release
+
+on:
+  push:
+    branches:
+      - master
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build & Publish Release
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            9.0.x
+            10.0.x
+
+      - name: Download and Setup Dalamud
+        shell: pwsh
+        run: |
+          $dalamudPath = "$env:RUNNER_TEMP\dalamud"
+          New-Item -ItemType Directory -Force -Path $dalamudPath
+          Invoke-WebRequest -Uri "https://goatcorp.github.io/dalamud-distrib/latest.zip" -OutFile "$env:RUNNER_TEMP\dalamud.zip"
+          Expand-Archive -Path "$env:RUNNER_TEMP\dalamud.zip" -DestinationPath $dalamudPath -Force
+          echo "DALAMUD_HOME=$dalamudPath" >> $env:GITHUB_ENV
+
+      - name: Restore dependencies
+        run: dotnet restore AutoKeyboundBrawler.slnx
+
+      - name: Build Plugin (Release)
+        run: dotnet build AutoKeyboundBrawler.slnx --configuration Release --no-restore
+
+      - name: Prepare Release Assets
+        id: prepare_assets
+        shell: pwsh
+        run: |
+          [xml]$csproj = Get-Content "AutoKeyboundBrawler/AutoKeyboundBrawler.csproj"
+          $ver = $csproj.Project.PropertyGroup.Version | Where-Object { $_ } | Select-Object -First 1
+          if (-not $ver) { $ver = "1.0.0.0" }
+          echo "tag=v$ver" >> $env:GITHUB_OUTPUT
+
+          $packagerZip = "AutoKeyboundBrawler/bin/x64/Release/AutoKeyboundBrawler/latest.zip"
+          if (-not (Test-Path $packagerZip)) {
+              $packagerZip = "AutoKeyboundBrawler/bin/Release/AutoKeyboundBrawler/latest.zip"
+          }
+          if (Test-Path $packagerZip) {
+              Copy-Item $packagerZip "AutoKeyboundBrawler.zip" -Force
+              Copy-Item $packagerZip "latest.zip" -Force
+          } else {
+              throw "Packaged zip not found at $packagerZip"
+          }
+
+          $jsonFile = "AutoKeyboundBrawler/bin/x64/Release/AutoKeyboundBrawler/AutoKeyboundBrawler.json"
+          if (-not (Test-Path $jsonFile)) {
+              $jsonFile = "AutoKeyboundBrawler/bin/Release/AutoKeyboundBrawler/AutoKeyboundBrawler.json"
+          }
+          if (Test-Path $jsonFile) {
+              Copy-Item $jsonFile "AutoKeyboundBrawler.json" -Force
+          }
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.prepare_assets.outputs.tag }}
+          name: Release ${{ steps.prepare_assets.outputs.tag }}
+          files: |
+            AutoKeyboundBrawler.zip
+            latest.zip
+            AutoKeyboundBrawler.json
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

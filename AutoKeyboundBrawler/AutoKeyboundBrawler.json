@@ -5,6 +5,7 @@
   "Description": "Automates the Keybound Brawler typing minigame event. Features humanized typing simulation, instant stop-typing safety pauses, punctuation simplification, and configurable AFK queueing.",
   "InternalName": "AutoKeyboundBrawler",
   "RepoUrl": "https://github.com/1Stalk/AutoKeyboundBrawler",
+  "IconUrl": "https://raw.githubusercontent.com/1Stalk/AutoKeyboundBrawler/master/images/icon.png",
   "ApplicableVersion": "any",
   "DalamudApiLevel": 15,
   "LoadRequiredState": 0,
