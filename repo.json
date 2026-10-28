@@ -5,7 +5,7 @@
     "Punchline": "Automated assistant and typing solver for Keybound Brawler.",
     "Description": "Automates the Keybound Brawler typing minigame event. Features humanized typing simulation, instant stop-typing safety pauses, punctuation simplification, and configurable AFK queueing.",
     "InternalName": "AutoKeyboundBrawler",
-    "AssemblyVersion": "1.0.0.0",
+    "AssemblyVersion": "1.0.0.1",
     "RepoUrl": "https://github.com/1Stalk/AutoKeyboundBrawler",
     "ApplicableVersion": "any",
     "DalamudApiLevel": 15,
