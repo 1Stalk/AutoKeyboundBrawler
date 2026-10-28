@@ -4,7 +4,7 @@ using System.Collections.Generic;
 
 namespace AutoKeyboundBrawler.Interop;
 
-public record KTGTargetWord(int SlotId, string Word);
+public record KTGTargetWord(int SlotId, string Word, float ScreenY = 0f, float ScreenX = 0f);
 
 public static unsafe class AddonKTGEWord
 {
@@ -20,6 +20,7 @@ public static unsafe class AddonKTGEWord
     /// <summary>
     /// Reads all truly visible enemy target words from KTGEWord.
     /// Strictly verifies ancestral visibility: both the parent component node and the text node must be visible.
+    /// Also records the screen position (ScreenY, ScreenX) for spatial target prioritization.
     /// </summary>
     public static List<KTGTargetWord> ReadActiveTargets()
     {
@@ -59,7 +60,12 @@ public static unsafe class AddonKTGEWord
                             var text = GUINodeUtils.GetNodeText(child);
                             if (!string.IsNullOrWhiteSpace(text))
                             {
-                                targets.Add(new KTGTargetWord((int)node->NodeId, text.Trim()));
+                                var screenY = node->ScreenY != 0 ? node->ScreenY : (child->ScreenY != 0 ? child->ScreenY : node->Y);
+                                var screenX = node->ScreenX != 0 ? node->ScreenX : (child->ScreenX != 0 ? child->ScreenX : node->X);
+
+                                if (screenY < -500f) continue; // Ignore off-screen placeholder
+
+                                targets.Add(new KTGTargetWord((int)node->NodeId, text.Trim(), screenY, screenX));
                             }
                         }
                     }

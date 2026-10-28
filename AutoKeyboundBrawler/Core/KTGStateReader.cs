@@ -25,6 +25,8 @@ public class CachedTarget
 {
     public int SlotId { get; init; }
     public string Word { get; init; } = string.Empty;
+    public float ScreenY { get; set; }
+    public float ScreenX { get; set; }
     public DateTime LastSeenUtc { get; set; }
 }
 
@@ -147,7 +149,6 @@ public static unsafe class KTGStateReader
         }
 
         var words = word.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-
         // 2. Full English quote / sentence structure (3 or more words)
         // (e.g. "Just doing my job. Nothing more.", "Listen to the Cries of the Planet", "Feels like we're flying high these days!")
         if (words.Length >= 3)
@@ -172,7 +173,7 @@ public static unsafe class KTGStateReader
             .FirstOrDefault(c => c.SlotId != 2 && c.LastSeenUtc >= cutoff && IsDefenseSentence(c.Word, c.SlotId));
         if (cached != null)
         {
-            defenseTarget = new KTGTargetWord(cached.SlotId, cached.Word);
+            defenseTarget = new KTGTargetWord(cached.SlotId, cached.Word, cached.ScreenY, cached.ScreenX);
             return true;
         }
 
@@ -261,6 +262,8 @@ public static unsafe class KTGStateReader
     /// <summary>
     /// Selects the best active target word currently verified on screen using
     /// priority hierarchy: Defense Sentences > Casting Adds > Regular Adds > Boss.
+    /// When selecting among regular mobs/adds, prioritizes the lowest enemy on screen
+    /// (closest to the players' wall).
     /// If phrases are obscured/hidden by confusion debuff, falls back to short-term target memory.
     /// </summary>
     public static KTGTargetWord? GetBestTarget(
@@ -279,14 +282,30 @@ public static unsafe class KTGStateReader
                 if (_targetCache.TryGetValue(t.SlotId, out var existing))
                 {
                     existing.LastSeenUtc = now;
+                    existing.ScreenY = t.ScreenY;
+                    existing.ScreenX = t.ScreenX;
                     if (existing.Word != t.Word)
                     {
-                        _targetCache[t.SlotId] = new CachedTarget { SlotId = t.SlotId, Word = t.Word, LastSeenUtc = now };
+                        _targetCache[t.SlotId] = new CachedTarget
+                        {
+                            SlotId = t.SlotId,
+                            Word = t.Word,
+                            ScreenY = t.ScreenY,
+                            ScreenX = t.ScreenX,
+                            LastSeenUtc = now
+                        };
                     }
                 }
                 else
                 {
-                    _targetCache[t.SlotId] = new CachedTarget { SlotId = t.SlotId, Word = t.Word, LastSeenUtc = now };
+                    _targetCache[t.SlotId] = new CachedTarget
+                    {
+                        SlotId = t.SlotId,
+                        Word = t.Word,
+                        ScreenY = t.ScreenY,
+                        ScreenX = t.ScreenX,
+                        LastSeenUtc = now
+                    };
                 }
             }
 
@@ -312,7 +331,7 @@ public static unsafe class KTGStateReader
             var cutoff = DateTime.UtcNow.AddSeconds(-4.0);
             candidates = _targetCache.Values
                 .Where(c => c.LastSeenUtc >= cutoff)
-                .Select(c => new KTGTargetWord(c.SlotId, c.Word))
+                .Select(c => new KTGTargetWord(c.SlotId, c.Word, c.ScreenY, c.ScreenX))
                 .ToList();
         }
         else
@@ -339,9 +358,14 @@ public static unsafe class KTGStateReader
         var castingSlotIds = new HashSet<int>(activeCasts.Select(c => c.SlotId));
         var hasBossOnScreen = candidates.Any(t => t.SlotId == 2);
 
-        // Multi-tier sort: Priority first, then shortest word length
+        // Multi-tier spatial sort:
+        // 1. Priority tier: Defense Sentence (Tier 0) > Casting Adds (Tier 1) > Regular Adds (Tier 2) / Wave Mobs (Tier 3) > Boss (Tier 4/5)
+        // 2. Spatial proximity: For mobs marching towards players, target the lowest enemy on screen first
+        //    (largest ScreenY = closest to the players' wall)
+        // 3. Shorter word length as tie-breaker
         var sorted = candidates
             .OrderBy(t => GetTargetPriority(t, hasBossOnScreen, castingSlotIds, config))
+            .ThenByDescending(t => t.ScreenY)
             .ThenBy(t => t.Word.Length)
             .ToList();
 

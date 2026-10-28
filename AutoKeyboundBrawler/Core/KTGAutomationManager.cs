@@ -208,7 +208,7 @@ public class KTGAutomationManager
             var tag = isDefense ? "[DEFENSE SENTENCE]" : (isBoss ? "[BOSS]" : "[ADD/MOB]");
 
             CurrentStatus = $"{tag} Enqueued: \"{target.Word}\"";
-            _log.Information($"[AutoKeyboundBrawler] Target selected {tag} (Slot {target.SlotId}): \"{target.Word}\"");
+            _log.Information($"[AutoKeyboundBrawler] Target selected {tag} (Slot {target.SlotId}, ScreenY {target.ScreenY:F1}): \"{target.Word}\"");
             _simulator.EnqueueWord(target.Word, _config);
         }
         else
