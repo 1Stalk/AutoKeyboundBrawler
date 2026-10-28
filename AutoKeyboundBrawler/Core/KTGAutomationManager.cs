@@ -290,6 +290,7 @@ public class KTGAutomationManager
         if (_simulator.IsTyping) _simulator.Clear();
         _wasInHalt = false;
         _haltRecoveryState = HaltRecoveryState.None;
+        AddonKTGEnemyCastBar.Reset();
         KTGStateReader.ClearCache();
 
         if ((_config.AutoLeaveResults || _config.AutoLoopEnabled) && (DateTime.UtcNow - _lastActionTime).TotalMilliseconds > 1000)
@@ -487,6 +488,7 @@ public class KTGAutomationManager
         _wasInHalt = false;
         _haltRecoveryState = HaltRecoveryState.None;
         _lastHaltRecoveryTime = DateTime.MinValue;
+        AddonKTGEnemyCastBar.Reset();
         KTGStateReader.ClearCache();
         CurrentStatus = "Reset";
     }

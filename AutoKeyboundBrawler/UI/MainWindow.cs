@@ -214,8 +214,8 @@ public class MainWindow : Window, IDisposable
             DrawSectionLabel(dl, "COMBAT", contentWidth, scale);
 
             var stopPenalty = _config.StopOnPenaltyCast;
-            if (FF7ToggleSwitch.DrawRow("##stop_penalty", "Red Obstruction Halt", "Pause typing on obstruction cast", ref stopPenalty,
-                FF7RTheme.LimitRed, "Stops all typing simulation instantly when enemy casts Red Keyboard Obstruction to prevent death."))
+            if (FF7ToggleSwitch.DrawRow("##stop_penalty", "Halt Avoid", "Avoid Dynamic Sensory Jammer & Cursed Gaze", ref stopPenalty,
+                FF7RTheme.LimitRed, "Stops typing before cast finishes and waits 3-4s to avoid Halt penalties."))
             {
                 _config.StopOnPenaltyCast = stopPenalty;
                 _config.Save();
