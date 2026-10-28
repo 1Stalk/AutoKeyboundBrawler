@@ -15,7 +15,7 @@ public class MainWindow : Window, IDisposable
     private const ImGuiWindowFlags BaseFlags =
         ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse | ImGuiWindowFlags.NoCollapse;
 
-    private static readonly Vector2 DefaultSize = new(280, 340);
+    private static readonly Vector2 DefaultSize = new(280, 260);
     private static readonly WindowSizeConstraints CompactConstraints = new()
     {
         MinimumSize = new Vector2(240, HeaderBar.Height),
@@ -23,8 +23,8 @@ public class MainWindow : Window, IDisposable
     };
     private static readonly WindowSizeConstraints ExpandedConstraints = new()
     {
-        MinimumSize = new Vector2(260, 280),
-        MaximumSize = new Vector2(360, 480),
+        MinimumSize = new Vector2(260, 220),
+        MaximumSize = new Vector2(360, 420),
     };
 
     private readonly Configuration _config;
@@ -207,41 +207,6 @@ public class MainWindow : Window, IDisposable
                 FF7RTheme.MakoCyan, "Automatically strips punctuation symbols to guarantee faster, error-free typing."))
             {
                 _config.IgnorePunctuation = ignorePunct;
-                _config.Save();
-            }
-
-            // 4. Section: COMBAT
-            DrawSectionLabel(dl, "COMBAT", contentWidth, scale);
-
-            var stopPenalty = _config.StopOnPenaltyCast;
-            if (FF7ToggleSwitch.DrawRow("##stop_penalty", "Halt Avoid", "Avoid Dynamic Sensory Jammer & Cursed Gaze", ref stopPenalty,
-                FF7RTheme.LimitRed, "Stops typing before cast finishes and waits 3-4s to avoid Halt penalties."))
-            {
-                _config.StopOnPenaltyCast = stopPenalty;
-                _config.Save();
-            }
-
-            var prioAdds = _config.PrioritizeAdds;
-            if (FF7ToggleSwitch.DrawRow("##prio_adds", "Prioritize Adds", "Focus add mobs before boss", ref prioAdds,
-                FF7RTheme.MakoCyan, "Solves add mobs first to clear lethal room mechanics before switching to boss."))
-            {
-                _config.PrioritizeAdds = prioAdds;
-                _config.Save();
-            }
-
-            var prioDefense = _config.PrioritizeDefense;
-            if (FF7ToggleSwitch.DrawRow("##prio_defense", "Prioritize Defense", "Raise shield against tankbusters", ref prioDefense,
-                FF7RTheme.MakoCyan, "Immediately switches typing priority to defensive quotes when a tankbuster is imminent."))
-            {
-                _config.PrioritizeDefense = prioDefense;
-                _config.Save();
-            }
-
-            var memoryMode = _config.MemoryModeObscured;
-            if (FF7ToggleSwitch.DrawRow("##memory_mode", "Memory Mode", "Solve hidden words from database", ref memoryMode,
-                FF7RTheme.MakoCyan, "Reconstructs obscured or ??? words from the Lumina Excel database."))
-            {
-                _config.MemoryModeObscured = memoryMode;
                 _config.Save();
             }
         }

@@ -49,6 +49,14 @@ public class Configuration : IPluginConfiguration
     public void Initialize(IDalamudPluginInterface pi)
     {
         _pluginInterface = pi;
+
+        // Combat mechanics are always active
+        StopOnPenaltyCast = true;
+        PrioritizeAdds = true;
+        PrioritizeDefense = true;
+        AbortForDefense = true;
+        MemoryModeObscured = true;
+
         // Automatically sync AutoLoopEnabled if sub-flags are already true
         if (AutoTalkRegistrar && AutoConfirmRegister)
         {
