@@ -89,11 +89,15 @@ public static unsafe class AddonKTGEnemyCastBar
                     var child = comp->Component->UldManager.NodeList[j];
                     if (child == null || child->Type != NodeType.Text || !GUINodeUtils.IsNodeActuallyVisible(child, node)) continue;
 
+                    // Node 5 is the numerical cast timer (e.g. "3.5s" or "0"), Node 3 is "Interrupted!"
+                    if (child->NodeId == 5 || child->NodeId == 3) continue;
+
                     var text = GUINodeUtils.GetNodeText(child);
                     if (!string.IsNullOrWhiteSpace(text))
                     {
                         text = text.Trim();
-                        // Ignore pure timers/percentages like "3.0s", "100%"
+                        if (string.Equals(text, "Interrupted!", StringComparison.OrdinalIgnoreCase)) continue;
+
                         if (text.Length > 2 && text.Any(char.IsLetter))
                         {
                             casts.Add(new KTGActiveCast((int)node->NodeId, text));
@@ -104,6 +108,26 @@ public static unsafe class AddonKTGEnemyCastBar
         }
 
         return casts;
+    }
+
+    /// <summary>
+    /// Checks if a spell name corresponds to a Cactuar Needles cast:
+    /// e.g. "??? Needles", "1,000 Needles", "10,000 Needles", "Needles", "Countless Needles", etc.
+    /// </summary>
+    public static bool IsNeedlesSpell(string? spellName)
+    {
+        if (string.IsNullOrWhiteSpace(spellName)) return false;
+        return spellName.Contains("needle", StringComparison.OrdinalIgnoreCase) ||
+               spellName.Contains("はり") ||
+               spellName.Contains("nadel", StringComparison.OrdinalIgnoreCase) ||
+               spellName.Contains("aiguille", StringComparison.OrdinalIgnoreCase);
+    }
+
+    public static bool HasActiveNeedlesCast(out KTGActiveCast? needlesCast)
+    {
+        var casts = ReadActiveCasts();
+        needlesCast = casts.FirstOrDefault(c => IsNeedlesSpell(c.SpellName));
+        return needlesCast != null;
     }
 
     /// <summary>

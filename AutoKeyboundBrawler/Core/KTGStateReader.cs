@@ -160,6 +160,19 @@ public static unsafe class KTGStateReader
     }
 
     /// <summary>
+    /// Checks if a prompt word corresponds to a Cactuar / Sabotender mob.
+    /// </summary>
+    public static bool IsCactuarWord(string word)
+    {
+        if (string.IsNullOrWhiteSpace(word)) return false;
+        var lower = word.ToLowerInvariant();
+        return lower.Contains("cactuar") ||
+               lower.Contains("sabotender") ||
+               lower.Contains("needle") ||
+               lower.Contains("はり");
+    }
+
+    /// <summary>
     /// Checks if an active defensive prompt is currently visible on screen.
     /// </summary>
     public static bool HasActiveDefenseSentenceOnScreen(out KTGTargetWord? defenseTarget)
@@ -181,6 +194,40 @@ public static unsafe class KTGStateReader
     }
 
     /// <summary>
+    /// Checks if an active Cactuar casting "Needles" (or with Cactuar phrase) is currently visible on screen.
+    /// </summary>
+    public static bool HasActiveNeedlesTargetOnScreen(out KTGTargetWord? needlesTarget)
+    {
+        var targets = AddonKTGEWord.ReadActiveTargets();
+        var casts = AddonKTGEnemyCastBar.ReadActiveCasts();
+        var needleSlots = casts
+            .Where(c => AddonKTGEnemyCastBar.IsNeedlesSpell(c.SpellName))
+            .Select(c => c.SlotId)
+            .ToHashSet();
+
+        // 1. Target directly in slot casting Needles
+        needlesTarget = targets.FirstOrDefault(t => t.SlotId != 2 && needleSlots.Contains(t.SlotId));
+        if (needlesTarget != null) return true;
+
+        // 2. Target whose word matches Cactuar and is actively casting
+        var castingSlots = casts.Select(c => c.SlotId).ToHashSet();
+        needlesTarget = targets.FirstOrDefault(t => t.SlotId != 2 && castingSlots.Contains(t.SlotId) && IsCactuarWord(t.Word));
+        if (needlesTarget != null) return true;
+
+        // 3. Fallback to cached target if briefly obscured
+        var cutoff = DateTime.UtcNow.AddSeconds(-4.0);
+        var cached = _targetCache.Values
+            .FirstOrDefault(c => c.SlotId != 2 && c.LastSeenUtc >= cutoff && (needleSlots.Contains(c.SlotId) || IsCactuarWord(c.Word)));
+        if (cached != null)
+        {
+            needlesTarget = new KTGTargetWord(cached.SlotId, cached.Word, cached.ScreenY, cached.ScreenX);
+            return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// Checks if active adds (smaller mobs) are present on screen alongside a boss (slot 2).
     /// </summary>
     public static bool HasActiveAddsOnScreen()
@@ -193,16 +240,19 @@ public static unsafe class KTGStateReader
     /// <summary>
     /// Computes multi-tier target priority:
     /// Tier 0: Defensive Sentence (urgent shield before strong attack - strictly non-boss slot only!)
-    /// Tier 1: Casting Adds (interrupt explosion/skills e.g. Burst)
-    /// Tier 2: Regular Adds (kill small mobs to clear the field and build fever)
-    /// Tier 3: Standard wave regular enemies
-    /// Tier 4: Casting Boss (when all adds are down)
-    /// Tier 5: Idle Boss (when all adds are down)
+    /// Tier 1: Cactuar casting Needles (EMERGENCY INTERRUPT - kill cactuar first!)
+    /// Tier 2: Other casting adds (interrupt explosion/skills e.g. Burst)
+    /// Tier 3: Cactuar mob idle/spawning on screen
+    /// Tier 4: Regular Adds (with boss on screen)
+    /// Tier 5: Standard wave regular enemies
+    /// Tier 6: Casting Boss
+    /// Tier 7: Idle Boss
     /// </summary>
     public static int GetTargetPriority(
         KTGTargetWord target,
         bool hasBossOnScreen,
-        HashSet<int> castingSlotIds,
+        HashSet<int> needleSlotIds,
+        HashSet<int> otherCastingSlotIds,
         Configuration config)
     {
         // Tier 0: Defensive Sentence (strictly non-boss slots only!)
@@ -211,57 +261,49 @@ public static unsafe class KTGStateReader
             return 0;
         }
 
+        // Tier 1: Cactuar casting "??? Needles" (highest kill priority among enemies!)
+        if (target.SlotId != 2 && (needleSlotIds.Contains(target.SlotId) || (otherCastingSlotIds.Contains(target.SlotId) && IsCactuarWord(target.Word))))
+        {
+            return 1;
+        }
+
+        // Tier 2: Other casting adds (e.g. Burst)
+        if (target.SlotId != 2 && otherCastingSlotIds.Contains(target.SlotId))
+        {
+            return 2;
+        }
+
+        // Tier 3: Cactuar mob on screen (even before cast starts)
+        if (target.SlotId != 2 && IsCactuarWord(target.Word))
+        {
+            return 3;
+        }
+
         // When a Boss is present on screen (Slot 2)
         if (hasBossOnScreen)
         {
-            if (target.SlotId != 2) // It's an Add
+            if (target.SlotId != 2) // It's a Regular Add
             {
-                if (config.PrioritizeAdds)
-                {
-                    // Tier 1: Casting Add (e.g. Burst)
-                    if (castingSlotIds.Contains(target.SlotId))
-                    {
-                        return 1;
-                    }
-
-                    // Tier 2: Regular Add
-                    return 2;
-                }
-                else
-                {
-                    return castingSlotIds.Contains(target.SlotId) ? 1 : 3;
-                }
+                return config.PrioritizeAdds ? 4 : 5;
             }
             else // It's the Boss (Slot 2)
             {
-                // Tier 4: Casting Boss
-                if (castingSlotIds.Contains(target.SlotId))
-                {
-                    return 4;
-                }
-
-                // Tier 5: Idle Boss
-                return 5;
+                return otherCastingSlotIds.Contains(2) || needleSlotIds.Contains(2) ? 6 : 7;
             }
         }
 
         // Standard wave (no boss on screen)
-        if (target.SlotId != 2 && castingSlotIds.Contains(target.SlotId))
-        {
-            return 1; // Interrupt casting enemy
-        }
-
         if (target.SlotId == 2)
         {
-            return castingSlotIds.Contains(2) ? 4 : 5;
+            return otherCastingSlotIds.Contains(2) || needleSlotIds.Contains(2) ? 6 : 7;
         }
 
-        return 3; // Standard enemy
+        return 5; // Standard wave regular enemy
     }
 
     /// <summary>
     /// Selects the best active target word currently verified on screen using
-    /// priority hierarchy: Defense Sentences > Casting Adds > Regular Adds > Boss.
+    /// priority hierarchy: Defense Sentences > Cactuar Needles > Other Casting Adds > Regular Adds > Boss.
     /// When selecting among regular mobs/adds, prioritizes the lowest enemy on screen
     /// (closest to the players' wall).
     /// If phrases are obscured/hidden by confusion debuff, falls back to short-term target memory.
@@ -355,16 +397,23 @@ public static unsafe class KTGStateReader
         }
 
         var activeCasts = AddonKTGEnemyCastBar.ReadActiveCasts();
-        var castingSlotIds = new HashSet<int>(activeCasts.Select(c => c.SlotId));
+        var needleSlotIds = activeCasts
+            .Where(c => AddonKTGEnemyCastBar.IsNeedlesSpell(c.SpellName))
+            .Select(c => c.SlotId)
+            .ToHashSet();
+        var otherCastingSlotIds = activeCasts
+            .Where(c => !AddonKTGEnemyCastBar.IsNeedlesSpell(c.SpellName))
+            .Select(c => c.SlotId)
+            .ToHashSet();
         var hasBossOnScreen = candidates.Any(t => t.SlotId == 2);
 
         // Multi-tier spatial sort:
-        // 1. Priority tier: Defense Sentence (Tier 0) > Casting Adds (Tier 1) > Regular Adds (Tier 2) / Wave Mobs (Tier 3) > Boss (Tier 4/5)
+        // 1. Priority tier: Defense Sentence (0) > Needles Cactuar (1) > Other Casting Adds (2) > Cactuar mob (3) > Regular Adds (4) / Wave Mobs (5) > Boss (6/7)
         // 2. Spatial proximity: For mobs marching towards players, target the lowest enemy on screen first
         //    (largest ScreenY = closest to the players' wall)
         // 3. Shorter word length as tie-breaker
         var sorted = candidates
-            .OrderBy(t => GetTargetPriority(t, hasBossOnScreen, castingSlotIds, config))
+            .OrderBy(t => GetTargetPriority(t, hasBossOnScreen, needleSlotIds, otherCastingSlotIds, config))
             .ThenByDescending(t => t.ScreenY)
             .ThenBy(t => t.Word.Length)
             .ToList();

@@ -2,6 +2,7 @@ using AutoKeyboundBrawler.Interop;
 using Dalamud.Plugin.Services;
 using ECommons.DalamudServices;
 using System;
+using System.Linq;
 
 namespace AutoKeyboundBrawler.Core;
 
@@ -160,8 +161,9 @@ public class KTGAutomationManager
             // on-screen words for several seconds. When words are hidden, the player is expected to finish
             // typing the word from memory. The simulator smoothly types the word to completion and sends Enter.
 
-            // The ONLY mid-typing preemption allowed is if we are typing the BOSS (Slot 2)
-            // and an urgent Defensive Sentence appears to survive a Tankbuster/ultimate attack.
+            // Preemption checks when typing Boss (Slot 2):
+            // 1) Urgent Defensive Sentence to survive incoming boss ultimate/tankbuster.
+            // 2) Emergency Cactuar Needles cast to eliminate Cactuar immediately.
             if (_lastTargetSlotId == 2 && (DateTime.UtcNow - _lastPreemptTime).TotalMilliseconds > 2000)
             {
                 if (_config.PrioritizeDefense &&
@@ -177,6 +179,20 @@ public class KTGAutomationManager
                     KTGInputSimulator.TryClearInputBuffer();
                     _lastTargetSlotId = -1;
                     CurrentStatus = "Switching to urgent defense prompt!";
+                    return;
+                }
+
+                if (KTGStateReader.HasActiveNeedlesTargetOnScreen(out var needlesTarget) &&
+                    needlesTarget != null &&
+                    needlesTarget.SlotId != 2 &&
+                    !string.Equals(needlesTarget.Word, _simulator.CurrentWord, StringComparison.OrdinalIgnoreCase))
+                {
+                    _lastPreemptTime = DateTime.UtcNow;
+                    _log.Information($"[AutoKeyboundBrawler] Emergency Cactuar Needles prompt \"{needlesTarget.Word}\" (Slot {needlesTarget.SlotId}) detected while typing boss! Preempting boss to eliminate Cactuar immediately.");
+                    _simulator.Clear();
+                    KTGInputSimulator.TryClearInputBuffer();
+                    _lastTargetSlotId = -1;
+                    CurrentStatus = "Switching to emergency Cactuar target!";
                     return;
                 }
             }
@@ -204,8 +220,10 @@ public class KTGAutomationManager
             _lastTargetWord = target.Word;
 
             var isDefense = KTGStateReader.IsDefenseSentence(target.Word, target.SlotId);
+            var isNeedles = KTGStateReader.IsCactuarWord(target.Word) ||
+                            AddonKTGEnemyCastBar.ReadActiveCasts().Any(c => c.SlotId == target.SlotId && AddonKTGEnemyCastBar.IsNeedlesSpell(c.SpellName));
             var isBoss = target.SlotId == 2;
-            var tag = isDefense ? "[DEFENSE SENTENCE]" : (isBoss ? "[BOSS]" : "[ADD/MOB]");
+            var tag = isDefense ? "[DEFENSE SENTENCE]" : (isNeedles ? "[CACTUAR/NEEDLES]" : (isBoss ? "[BOSS]" : "[ADD/MOB]"));
 
             CurrentStatus = $"{tag} Enqueued: \"{target.Word}\"";
             _log.Information($"[AutoKeyboundBrawler] Target selected {tag} (Slot {target.SlotId}, ScreenY {target.ScreenY:F1}): \"{target.Word}\"");
