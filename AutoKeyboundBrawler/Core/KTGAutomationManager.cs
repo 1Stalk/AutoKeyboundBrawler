@@ -66,6 +66,9 @@ public class KTGAutomationManager
 
         var phase = KTGStateReader.GetCurrentPhase();
 
+        // Keep-alive: Reset both game-internal ContentInputTimer and OS idle timer so FFXIV never auto-kicks for inactivity
+        KTGAntiAfk.KeepAlive();
+
         switch (phase)
         {
             case EventPhase.InMinigame:
