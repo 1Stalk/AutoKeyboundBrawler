@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project Sdk="Dalamud.NET.Sdk/15.0.0">
+    <PropertyGroup>
+        <Authors>1Stalk</Authors>
+        <Version>1.0.0.0</Version>
+        <Description>Automated assistant and typing solver for Keybound Brawler.</Description>
+        <AssemblyName>AutoKeyboundBrawler</AssemblyName>
+        <RootNamespace>AutoKeyboundBrawler</RootNamespace>
+    </PropertyGroup>
+
+    <PropertyGroup>
+        <LangVersion>preview</LangVersion>
+        <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <PackageReference Include="ECommons" Version="3.2.1.22" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <None Update="AutoKeyboundBrawler.json">
+            <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+        </None>
+        <None Include="..\images\icon.png" Link="images\icon.png">
+            <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+        </None>
+    </ItemGroup>
+
+    <Target Name="SyncBuildOutputs" AfterTargets="Build">
+        <ItemGroup>
+            <SyncFiles Include="$(TargetDir)*.dll;$(TargetDir)*.pdb;$(TargetDir)*.json" />
+            <SyncImageFiles Include="$(TargetDir)images\*.*" />
+        </ItemGroup>
+        <Copy SourceFiles="@(SyncFiles)" DestinationFolder="$(ProjectDir)bin\Debug\" Condition="'$(Configuration)' == 'Debug'" ContinueOnError="true" />
+        <Copy SourceFiles="@(SyncFiles)" DestinationFolder="$(ProjectDir)bin\x64\Debug\" Condition="'$(Configuration)' == 'Debug'" ContinueOnError="true" />
+        <Copy SourceFiles="$(ProjectDir)AutoKeyboundBrawler.json" DestinationFolder="$(ProjectDir)bin\Debug\" Condition="'$(Configuration)' == 'Debug'" ContinueOnError="true" />
+        <Copy SourceFiles="$(ProjectDir)AutoKeyboundBrawler.json" DestinationFolder="$(ProjectDir)bin\x64\Debug\" Condition="'$(Configuration)' == 'Debug'" ContinueOnError="true" />
+        <Copy SourceFiles="@(SyncImageFiles)" DestinationFolder="$(ProjectDir)bin\Debug\images\" Condition="'$(Configuration)' == 'Debug'" ContinueOnError="true" />
+        <Copy SourceFiles="@(SyncImageFiles)" DestinationFolder="$(ProjectDir)bin\x64\Debug\images\" Condition="'$(Configuration)' == 'Debug'" ContinueOnError="true" />
+    </Target>
+</Project>

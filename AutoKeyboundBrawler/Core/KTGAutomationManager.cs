@@ -1,0 +1,351 @@
+using AutoKeyboundBrawler.Interop;
+using Dalamud.Plugin.Services;
+using ECommons.DalamudServices;
+using System;
+
+namespace AutoKeyboundBrawler.Core;
+
+public class KTGAutomationManager
+{
+    private readonly Configuration _config;
+    private readonly IPluginLog _log;
+    private readonly KTGInputSimulator _simulator = new();
+
+    private DateTime _lastActionTime = DateTime.MinValue;
+    private DateTime _lastSubmissionTime = DateTime.MinValue;
+    private DateTime _lastPreemptTime = DateTime.MinValue;
+
+    private string _lastSubmittedWord = string.Empty;
+    private string _lastTargetWord = string.Empty;
+    private int _lastTargetSlotId = -1;
+
+    public string CurrentStatus { get; private set; } = "Idle";
+    public string ActiveWord => _simulator.IsTyping ? _simulator.CurrentWord : _lastTargetWord;
+    public bool IsTyping => _simulator.IsTyping;
+    public int RemainingChars => _simulator.RemainingChars;
+    public EventPhase CurrentPhase => KTGStateReader.GetCurrentPhase();
+
+    public KTGAutomationManager(Configuration config, IPluginLog log)
+    {
+        _config = config;
+        _log = log;
+    }
+
+    public void Tick()
+    {
+        var isActive = _config.MinigameAutoplay || _config.AutoLoopEnabled || _config.Enabled;
+        if (!isActive)
+        {
+            CurrentStatus = "Idle (Automation paused)";
+            if (_simulator.IsTyping)
+            {
+                _simulator.Clear();
+            }
+            return;
+        }
+
+        var phase = KTGStateReader.GetCurrentPhase();
+
+        switch (phase)
+        {
+            case EventPhase.InMinigame:
+                HandleMinigamePhase();
+                break;
+
+            case EventPhase.Results:
+                HandleResultsPhase();
+                break;
+
+            case EventPhase.Commencing:
+                HandleCommencingPhase();
+                break;
+
+            case EventPhase.Registering:
+                HandleRegisteringPhase();
+                break;
+
+            case EventPhase.InSquare:
+                HandleInSquarePhase();
+                break;
+
+            default:
+                CurrentStatus = "Waiting for Event Duty...";
+                if (_simulator.IsTyping)
+                {
+                    _simulator.Clear();
+                }
+                KTGStateReader.ClearCache();
+                break;
+        }
+    }
+
+    private void HandleMinigamePhase()
+    {
+        if (!_config.MinigameAutoplay)
+        {
+            CurrentStatus = "Minigame Autoplay Disabled";
+            if (_simulator.IsTyping) _simulator.Clear();
+            return;
+        }
+
+        // 1. Evaluate Safety (Stop on Red Keyboard penalty cast)
+        if (!KTGSafetyGuard.CanType(_config, out var safetyReason))
+        {
+            CurrentStatus = $"SAFETY HALT: {safetyReason}";
+            if (_simulator.IsTyping)
+            {
+                _log.Warning($"[AutoKeyboundBrawler] Safety stop triggered ({safetyReason}). Halting typing simulator without sending keystrokes.");
+                _simulator.Clear();
+            }
+            return;
+        }
+
+        // 2. Handle Just Submitted Event
+        if (_simulator.JustSubmitted)
+        {
+            _lastSubmittedWord = _simulator.LastSubmittedWord;
+            _lastSubmissionTime = DateTime.UtcNow;
+            _simulator.JustSubmitted = false;
+
+            // Invalidate submitted word from memory cache immediately
+            KTGStateReader.InvalidateSubmittedWord(_lastSubmittedWord);
+        }
+
+        var submitAgeMs = (DateTime.UtcNow - _lastSubmissionTime).TotalMilliseconds;
+
+        // 3. Post-submission debounce: give game engine 100ms to despawn defeated mob and clear buffer
+        if (submitAgeMs < 100)
+        {
+            CurrentStatus = "Waiting for screen update...";
+            return;
+        }
+
+        // 4. Mid-Typing Processing & Preemption
+        if (_simulator.IsTyping)
+        {
+            // CRITICAL: We DO NOT cancel typing when words disappear or hide on screen!
+            // In Keybound Brawler, the "Phrases partially obscured!" / confusion debuff periodically hides
+            // on-screen words for several seconds. When words are hidden, the player is expected to finish
+            // typing the word from memory. The simulator smoothly types the word to completion and sends Enter.
+
+            // The ONLY mid-typing preemption allowed is if we are typing the BOSS (Slot 2)
+            // and an urgent Defensive Sentence appears to survive a Tankbuster/ultimate attack.
+            if (_lastTargetSlotId == 2 && (DateTime.UtcNow - _lastPreemptTime).TotalMilliseconds > 2000)
+            {
+                if (_config.PrioritizeDefense &&
+                    _config.AbortForDefense &&
+                    KTGStateReader.HasActiveDefenseSentenceOnScreen(out var defenseTarget) &&
+                    defenseTarget != null &&
+                    defenseTarget.SlotId != 2 &&
+                    !string.Equals(defenseTarget.Word, _simulator.CurrentWord, StringComparison.OrdinalIgnoreCase))
+                {
+                    _lastPreemptTime = DateTime.UtcNow;
+                    _log.Information($"[AutoKeyboundBrawler] Urgent defense prompt \"{defenseTarget.Word}\" (Slot {defenseTarget.SlotId}) detected while typing boss! Preempting boss to raise defense immediately.");
+                    _simulator.Clear();
+                    KTGInputSimulator.TryClearInputBuffer();
+                    _lastTargetSlotId = -1;
+                    CurrentStatus = "Switching to urgent defense prompt!";
+                    return;
+                }
+            }
+
+            CurrentStatus = $"Typing: \"{_simulator.CurrentWord}\" ({_simulator.RemainingChars} left)";
+            _simulator.Update(_config);
+            return;
+        }
+
+        // 5. Pre-Typing Cleanliness: If KTGInput has leftover text, clear it first safely
+        if (!AddonKTGInput.IsInputEmpty())
+        {
+            if (KTGInputSimulator.TryClearInputBuffer())
+            {
+                CurrentStatus = "Clearing dirty input buffer...";
+            }
+            return;
+        }
+
+        // 6. Look for active prompt word from verified on-screen targets or memory cache
+        var target = KTGStateReader.GetBestTarget(_config, _lastSubmittedWord, submitAgeMs);
+        if (target != null && !string.IsNullOrWhiteSpace(target.Word))
+        {
+            _lastTargetSlotId = target.SlotId;
+            _lastTargetWord = target.Word;
+
+            var isDefense = KTGStateReader.IsDefenseSentence(target.Word, target.SlotId);
+            var isBoss = target.SlotId == 2;
+            var tag = isDefense ? "[DEFENSE SENTENCE]" : (isBoss ? "[BOSS]" : "[ADD/MOB]");
+
+            CurrentStatus = $"{tag} Enqueued: \"{target.Word}\"";
+            _log.Information($"[AutoKeyboundBrawler] Target selected {tag} (Slot {target.SlotId}): \"{target.Word}\"");
+            _simulator.EnqueueWord(target.Word, _config);
+        }
+        else
+        {
+            CurrentStatus = "In Combat (Waiting for word...)";
+        }
+    }
+
+    private void HandleResultsPhase()
+    {
+        CurrentStatus = "Minigame Finished (Results Screen)";
+        if (_simulator.IsTyping) _simulator.Clear();
+        KTGStateReader.ClearCache();
+
+        if ((_config.AutoLeaveResults || _config.AutoLoopEnabled) && (DateTime.UtcNow - _lastActionTime).TotalMilliseconds > 1000)
+        {
+            _log.Information("[AutoKeyboundBrawler] Auto-closing results screen...");
+            if (AddonKTGResult.CloseResults())
+            {
+                _lastActionTime = DateTime.UtcNow;
+            }
+        }
+    }
+
+    private void HandleCommencingPhase()
+    {
+        CurrentStatus = "Duty Found (Commencing...)";
+        if (_simulator.IsTyping) _simulator.Clear();
+        KTGStateReader.ClearCache();
+
+        if ((_config.AutoConfirmRegister || _config.AutoCommenceDuty || _config.AutoLoopEnabled) && (DateTime.UtcNow - _lastActionTime).TotalMilliseconds > 500)
+        {
+            _log.Information("[AutoKeyboundBrawler] Duty popped! Auto-commencing...");
+            if (AddonContentsFinderConfirm.CommenceDuty())
+            {
+                _lastActionTime = DateTime.UtcNow;
+            }
+        }
+    }
+
+    private void HandleRegisteringPhase()
+    {
+        CurrentStatus = "Registration Window Open";
+        if (_simulator.IsTyping) _simulator.Clear();
+        KTGStateReader.ClearCache();
+
+        if ((_config.AutoConfirmRegister || _config.AutoLoopEnabled) && (DateTime.UtcNow - _lastActionTime).TotalMilliseconds > 600)
+        {
+            _log.Information("[AutoKeyboundBrawler] Auto-confirming registration (pressing Register)...");
+            if (AddonKTGEnterDialogue.ConfirmRegistration())
+            {
+                _lastActionTime = DateTime.UtcNow;
+            }
+        }
+    }
+
+    private void HandleInSquarePhase()
+    {
+        if (_simulator.IsTyping) _simulator.Clear();
+        KTGStateReader.ClearCache();
+
+        // 1. If currently queued in Duty Finder, do NOT talk to the NPC!
+        if (Svc.Condition[Dalamud.Game.ClientState.Conditions.ConditionFlag.WaitingForDutyFinder])
+        {
+            CurrentStatus = "In Keybound Square (Queued for match...)";
+            return;
+        }
+
+        CurrentStatus = "In Keybound Square";
+
+        // 2. Advance NPC talk dialog if open
+        unsafe
+        {
+            if (ECommons.GenericHelpers.TryGetAddonByName("Talk", out FFXIVClientStructs.FFXIV.Component.GUI.AtkUnitBase* talk) &&
+                talk != null &&
+                talk->IsVisible &&
+                talk->IsReady)
+            {
+                ECommons.Automation.Callback.Fire(talk, true, 0);
+                return;
+            }
+        }
+
+        if (!_config.AutoTalkRegistrar && !_config.AutoLoopEnabled)
+        {
+            return;
+        }
+
+        // Throttle NPC interaction
+        if ((DateTime.UtcNow - _lastActionTime).TotalMilliseconds < 1500)
+        {
+            return;
+        }
+
+        if (Svc.Condition[Dalamud.Game.ClientState.Conditions.ConditionFlag.OccupiedInEvent] ||
+            Svc.Condition[Dalamud.Game.ClientState.Conditions.ConditionFlag.BetweenAreas])
+        {
+            return;
+        }
+
+        // Find Registrar
+        Dalamud.Game.ClientState.Objects.Types.IGameObject? registrar = null;
+
+        // Fast path: Current target is already Keybound Registrar
+        if (Svc.Targets.Target != null &&
+            (Svc.Targets.Target.BaseId == 1058751 ||
+             Svc.Targets.Target.Name.TextValue.Contains("Keybound Registrar", StringComparison.OrdinalIgnoreCase)))
+        {
+            registrar = Svc.Targets.Target;
+        }
+        else
+        {
+            // Full enumeration of all game objects (including EventNPCs > index 200)
+            foreach (var obj in Svc.Objects)
+            {
+                if (obj == null) continue;
+
+                if (obj.BaseId == 1058751 ||
+                    obj.Name.TextValue.Contains("Keybound Registrar", StringComparison.OrdinalIgnoreCase))
+                {
+                    registrar = obj;
+                    break;
+                }
+            }
+        }
+
+        if (registrar == null)
+        {
+            CurrentStatus = "In Keybound Square (Registrar not in range)";
+            return;
+        }
+
+        // Distance check: must be within 7 yalms
+        var localPlayer = Svc.Objects.LocalPlayer;
+        if (localPlayer != null)
+        {
+            var distance = System.Numerics.Vector3.Distance(localPlayer.Position, registrar.Position);
+            if (distance > 7.0f)
+            {
+                CurrentStatus = $"In Keybound Square (Registrar is {distance:F1}y away - walk closer)";
+                return;
+            }
+        }
+
+        // Step 1: Ensure registrar is actively targeted first
+        if (Svc.Targets.Target?.Address != registrar.Address)
+        {
+            Svc.Targets.Target = registrar;
+            CurrentStatus = "In Keybound Square (Targeting Registrar...)";
+            return; // Wait 1 frame so the target system establishes before interaction
+        }
+
+        // Step 2: Interact with targeted NPC
+        unsafe
+        {
+            FFXIVClientStructs.FFXIV.Client.Game.Control.TargetSystem.Instance()->InteractWithObject((FFXIVClientStructs.FFXIV.Client.Game.Object.GameObject*)registrar.Address, false);
+        }
+
+        CurrentStatus = "In Keybound Square (Interacting with Registrar...)";
+        _log.Information("[AutoKeyboundBrawler] Auto-interacted with Keybound Registrar.");
+        _lastActionTime = DateTime.UtcNow;
+    }
+
+    public void Reset()
+    {
+        _simulator.Clear();
+        _lastTargetSlotId = -1;
+        _lastPreemptTime = DateTime.MinValue;
+        KTGStateReader.ClearCache();
+        CurrentStatus = "Reset";
+    }
+}

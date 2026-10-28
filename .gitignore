@@ -1,0 +1,28 @@
+# Build results
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+[Ll]ogs/
+
+# Visual Studio
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+*.userprefs
+
+# JetBrains Rider
+.idea/
+*.sln.iml
+_ReSharper*/
+
+# VS Code
+.vscode/
+
+# OS and temporary files
+Thumbs.db
+[Dd]esktop.ini
+.DS_Store
+*.tmp
+*~
