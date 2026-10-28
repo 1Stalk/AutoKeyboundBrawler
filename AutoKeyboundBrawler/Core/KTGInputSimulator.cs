@@ -244,6 +244,16 @@ public unsafe class KTGInputSimulator
 
     public static void SendUnicodeChar(char c)
     {
+        try
+        {
+            const uint WM_CHAR = 0x0102;
+            KeyboardDevice.ProcessKeyboardInputMessage(IntPtr.Zero, WM_CHAR, (IntPtr)c, IntPtr.Zero);
+            return;
+        }
+        catch
+        {
+        }
+
         var inputs = new INPUT[2];
         inputs[0] = new INPUT
         {
@@ -281,6 +291,87 @@ public unsafe class KTGInputSimulator
 
     private static bool TryCharToVirtualKey(char c, out SeVirtualKey key)
     {
+        // 1. Direct German QWERTZ OEM virtual key mapping
+        // On German layout: ä/Ä = VK_OEM_7 (0xDE), ö/Ö = VK_OEM_3 (0xC0), ü/Ü = VK_OEM_1 (0xBA), ß = VK_OEM_4 (0xDB)
+        switch (c)
+        {
+            case 'ä':
+            case 'Ä':
+                key = (SeVirtualKey)0xDE;
+                return true;
+            case 'ö':
+            case 'Ö':
+                key = (SeVirtualKey)0xC0;
+                return true;
+            case 'ü':
+            case 'Ü':
+                key = (SeVirtualKey)0xBA;
+                return true;
+            case 'ß':
+                key = (SeVirtualKey)0xDB;
+                return true;
+        }
+
+        // 2. Direct French AZERTY OEM virtual key mapping
+        switch (c)
+        {
+            case 'é':
+            case 'É':
+                key = (SeVirtualKey)0x32; // VK_2
+                return true;
+            case 'è':
+            case 'È':
+                key = (SeVirtualKey)0x37; // VK_7
+                return true;
+            case 'à':
+            case 'À':
+                key = (SeVirtualKey)0x30; // VK_0
+                return true;
+            case 'ç':
+            case 'Ç':
+                key = (SeVirtualKey)0x39; // VK_9
+                return true;
+            case 'ù':
+            case 'Ù':
+                key = (SeVirtualKey)0xC0; // VK_OEM_3
+                return true;
+            case 'ê':
+            case 'ë':
+                key = SeVirtualKey.E;
+                return true;
+            case 'â':
+                key = SeVirtualKey.A;
+                return true;
+            case 'î':
+            case 'ï':
+                key = SeVirtualKey.I;
+                return true;
+            case 'ô':
+                key = SeVirtualKey.O;
+                return true;
+            case 'û':
+                key = SeVirtualKey.U;
+                return true;
+        }
+
+        // 3. Dynamic lookup via active Windows keyboard layout
+        var scan = PInvoke.VkKeyScan(c);
+        if (scan == -1 && char.IsUpper(c))
+        {
+            scan = PInvoke.VkKeyScan(char.ToLowerInvariant(c));
+        }
+
+        if (scan != -1)
+        {
+            var vk = (byte)(scan & 0xFF);
+            if (vk != 0)
+            {
+                key = (SeVirtualKey)vk;
+                return true;
+            }
+        }
+
+        // 4. Standard ASCII alphanumeric fallbacks
         if (c is >= 'a' and <= 'z')
         {
             key = (SeVirtualKey)((int)SeVirtualKey.A + (c - 'a'));
@@ -345,6 +436,9 @@ public unsafe class KTGInputSimulator
 
     private static class PInvoke
     {
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        public static extern short VkKeyScan(char ch);
+
         [DllImport("user32.dll")]
         public static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, int dwExtraInfo);
 

@@ -204,3 +204,4 @@ public static class KTGLocalizationRegistry
         return LocalizedRegisterButtonTexts.Any(b => text.Contains(b, StringComparison.OrdinalIgnoreCase));
     }
 }
+
