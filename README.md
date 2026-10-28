@@ -21,9 +21,17 @@ https://github.com/user-attachments/assets/91bab7d2-9797-4ddb-95b3-ba4bafde052e
 
 ## Features
 
-Humanized Typing · Smart Target Priority · Defense Preemption · Obstruction Safety · Obscured Word Memory · Punctuation Skip · AFK Duty Loop
+Multi-Language Support (EN / DE / FR / JA) · Humanized Typing · Smart Target Priority · Defense Preemption · Obstruction Safety · Obscured Word Memory · Punctuation Skip · AFK Duty Loop · Anti-AFK Kick Protection
 
 Type `/akb` in-game to open the config panel. Toggle what you need and let the solver handle the rest.
+
+## Multi-Language Support
+
+AutoKeyboundBrawler seamlessly supports all official client localizations of FINAL FANTASY XIV:
+- **English (EN)**: Standard QWERTY alphanumeric solver with instant defense preemption and punctuation skipping.
+- **German (DE)**: Native QWERTZ support, direct OEM umlaut mapping (`ä`, `ö`, `ü`, `ß`), and localized Cactuar cast detection (`???-Stacheln`).
+- **French (FR)**: Full AZERTY layout support, dead-key circumflex composing (`â`, `ê`, `î`, `ô`, `û`), digit typing via Numpad (preventing top-row `&` conflicts), typographical space trimming before punctuation (`!`, `?`), and localized Cactuar cast detection (`??? Epines`).
+- **Japanese (JA)**: Native support for Japanese client phrases, reading lookup from game database (`Unknown1` hiragana readings / 振り仮名), IME Hiragana mode (`あ`), and localized Cactuar cast detection (`針？本`).
 
 ## AI Transparency
 
