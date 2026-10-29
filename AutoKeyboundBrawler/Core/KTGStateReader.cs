@@ -140,39 +140,38 @@ public static unsafe class KTGStateReader
 
         if (string.IsNullOrWhiteSpace(word)) return false;
 
-        // Dedicated player defensive prompt slot in KTGEWord UI (if used)
-        if (slotId >= 20000)
+        // 1. Position-based detection: The player defense prompt in KTGEWord is positioned
+        // statically at the player's defensive barrier at the bottom of the screen (ScreenY ~734, >= 700).
+        // Regular marching adds despawn/explode when reaching the wall (ScreenY ~680).
+        if (screenY >= 700f)
         {
             return true;
         }
 
-        // 1. Check loaded database entry (which resolved defense prompts accurately)
-        var match = KTGWordDatabase.FindMatch(word);
-        if (match != null && match.IsDefense)
+        // 2. Active Boss Ultimate cast: When the boss is casting a known ultimate / shield-demanding spell,
+        // any non-boss prompt near the defense line is the defense prompt.
+        if (screenY >= 650f && AddonKTGEnemyCastBar.ReadActiveCasts().Any(c => KTGLocalizationRegistry.IsBossUltimateCast(c.SpellName)))
         {
             return true;
         }
 
-        // 2. Explicit defense keywords via KTGLocalizationRegistry (EN, DE, FR, JA)
+        // 3. Explicit defense keywords via KTGLocalizationRegistry (EN, DE, FR, JA: 防御, 守護, シールド, etc.)
         if (KTGLocalizationRegistry.ContainsDefenseKeyword(word))
         {
             return true;
         }
 
-        // 3. Japanese full quotation brackets 「...」
+        // 4. Japanese full quotation brackets 「...」 on non-boss target
         if (word.Contains('「') && word.Contains('」'))
         {
             return true;
         }
 
-        // 4. Full quote / sentence structure (3 or more words for space-separated languages)
-        var words = word.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        if (words.Length >= 3)
+        // 5. Database match with explicit defense flag
+        var match = KTGWordDatabase.FindMatch(word);
+        if (match != null && match.IsDefense)
         {
-            if (!KTGLocalizationRegistry.IsCactuarPrompt(word))
-            {
-                return true;
-            }
+            return true;
         }
 
         return false;
@@ -218,35 +217,15 @@ public static unsafe class KTGStateReader
 
     /// <summary>
     /// Checks if an active defensive prompt is currently visible on screen.
-    /// Excludes recently submitted defense words for 1.2 seconds while shield animations play
-    /// to prevent false preemption loops.
+    /// Only checks live on-screen targets (no stale cache fallback to prevent ghost typing when shield is already up).
+    /// Does not block recently submitted defense words because player must type defense repeatedly in a row to raise shield.
     /// </summary>
-    public static bool HasActiveDefenseSentenceOnScreen(out KTGTargetWord? defenseTarget, string? recentlySubmittedWord = null, double recentSubmitAgeMs = 9999)
+    public static bool HasActiveDefenseSentenceOnScreen(out KTGTargetWord? defenseTarget)
     {
         var targets = AddonKTGEWord.ReadActiveTargets();
-        defenseTarget = targets.FirstOrDefault(t => t.SlotId != 2 &&
-            IsDefenseSentence(t.Word, t.SlotId, t.ScreenY) &&
-            !(recentSubmitAgeMs < 1200 && IsSameWord(t.Word, recentlySubmittedWord)));
-        if (defenseTarget != null) return true;
-
-        var cutoff = DateTime.UtcNow.AddSeconds(-0.8);
-        var cached = _targetCache.Values
-            .FirstOrDefault(c => c.SlotId != 2 && c.LastSeenUtc >= cutoff &&
-                IsDefenseSentence(c.Word, c.SlotId, c.ScreenY) &&
-                !(recentSubmitAgeMs < 1200 && IsSameWord(c.Word, recentlySubmittedWord)));
-        if (cached != null)
-        {
-            defenseTarget = new KTGTargetWord(cached.SlotId, cached.Word, cached.ScreenY, cached.ScreenX);
-            return true;
-        }
-
-        return false;
+        defenseTarget = targets.FirstOrDefault(t => t.SlotId != 2 && IsDefenseSentence(t.Word, t.SlotId, t.ScreenY));
+        return defenseTarget != null;
     }
-
-    /// <summary>
-    /// Checks if an active Cactuar casting "Needles" (or with Cactuar phrase) is currently visible on screen.
-    /// Uses 3D WorldToScreen projection from Svc.Objects to link the casting Cactuar to its on-screen KTGEWord prompt.
-    /// </summary>
     public static bool HasActiveNeedlesTargetOnScreen(out KTGTargetWord? needlesTarget)
     {
         var targets = AddonKTGEWord.ReadActiveTargets();
@@ -424,7 +403,7 @@ public static unsafe class KTGStateReader
         // 0. ABSOLUTE TOP PRIORITY: Defensive Sentence (Player Shield)
         // If an active, unsubmitted defense prompt is on screen, IMMEDIATELY select it before anything else!
         // Never targets boss first when a defense phrase is already on screen.
-        if (config.PrioritizeDefense && HasActiveDefenseSentenceOnScreen(out var defenseTarget, recentlySubmittedWord, recentSubmitAgeMs) && defenseTarget != null)
+        if (config.PrioritizeDefense && HasActiveDefenseSentenceOnScreen(out var defenseTarget) && defenseTarget != null)
         {
             var match = KTGWordDatabase.FindMatch(defenseTarget.Word);
             return defenseTarget with { Word = match?.Original ?? defenseTarget.Word };
@@ -515,7 +494,7 @@ public static unsafe class KTGStateReader
         // Filter out recently submitted word (prevents re-targeting same mob within 1.2s)
         if (!string.IsNullOrEmpty(recentlySubmittedWord) && recentSubmitAgeMs < 1200)
         {
-            var filtered = candidates.Where(t => !IsSameWord(t.Word, recentlySubmittedWord)).ToList();
+            var filtered = candidates.Where(t => IsDefenseSentence(t.Word, t.SlotId, t.ScreenY) || !IsSameWord(t.Word, recentlySubmittedWord)).ToList();
             if (filtered.Count > 0)
             {
                 candidates = filtered;

@@ -171,20 +171,14 @@ public static class KTGWordDatabase
             return true;
         }
 
-        // Full quote sentences synchronized by row
-        if (enWords.Length >= 4 && (enText.EndsWith('.') || enText.EndsWith('!') || enText.EndsWith('?') || enText.EndsWith("...")))
-        {
-            return true;
-        }
-
         // Local Japanese quote check: must have Japanese quote brackets
         if (localText.Contains('「') && localText.Contains('」'))
         {
             return true;
         }
 
-        // Known boss defense quotes in Japanese
-        if (localText is "我が剣のサビとなれ！" or "命は星を巡る" or "マタ・タビ" or "星の輝きを力に！")
+        // Known defense quotes across languages (including 2nd boss defense prompts)
+        if (rowId == 240 || localText is "どんなときでもソルジャーの誇りは手放すな" or "我が剣のサビとなれ！" or "命は星を巡る" or "マタ・タビ" or "星の輝きを力に！")
         {
             return true;
         }
