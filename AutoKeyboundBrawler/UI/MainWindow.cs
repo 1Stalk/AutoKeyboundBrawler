@@ -49,6 +49,7 @@ public class MainWindow : Window, IDisposable
         SizeConstraints = ExpandedConstraints;
         AllowPinning = false;
         AllowClickthrough = false;
+        RespectCloseHotkey = false;
     }
 
     public void Dispose()

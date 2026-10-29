@@ -218,38 +218,47 @@ public class KTGAutomationManager
             // on-screen words for several seconds. When words are hidden, the player is expected to finish
             // typing the word from memory. The simulator smoothly types the word to completion and sends Enter.
 
-            // Preemption checks when typing Boss (Slot 2):
+            // Preemption checks when typing non-defensive target:
             // 1) Urgent Defensive Sentence to survive incoming boss ultimate/tankbuster.
             // 2) Emergency Cactuar Needles cast to eliminate Cactuar immediately.
-            if (_lastTargetSlotId == 2 && (DateTime.UtcNow - _lastPreemptTime).TotalMilliseconds > 2000)
+            var isCurrentlyDefense = KTGStateReader.IsDefenseSentence(_simulator.CurrentWord, _lastTargetSlotId);
+            var isCurrentlyNeedles = KTGStateReader.IsCactuarWord(_simulator.CurrentWord);
+
+            if ((DateTime.UtcNow - _lastPreemptTime).TotalMilliseconds > 400)
             {
-                if (_config.PrioritizeDefense &&
+                if (!isCurrentlyDefense &&
+                    _config.PrioritizeDefense &&
                     _config.AbortForDefense &&
-                    KTGStateReader.HasActiveDefenseSentenceOnScreen(out var defenseTarget) &&
+                    KTGStateReader.HasActiveDefenseSentenceOnScreen(out var defenseTarget, _lastSubmittedWord, submitAgeMs) &&
                     defenseTarget != null &&
                     defenseTarget.SlotId != 2 &&
                     !string.Equals(defenseTarget.Word, _simulator.CurrentWord, StringComparison.OrdinalIgnoreCase))
                 {
                     _lastPreemptTime = DateTime.UtcNow;
-                    _log.Information($"[AutoKeyboundBrawler] Urgent defense prompt \"{defenseTarget.Word}\" (Slot {defenseTarget.SlotId}) detected while typing boss! Preempting boss to raise defense immediately.");
+                    _log.Information($"[AutoKeyboundBrawler] Urgent defense prompt \"{defenseTarget.Word}\" (Slot {defenseTarget.SlotId}, ScreenY {defenseTarget.ScreenY:F1}) detected! Preempting current target to raise defense immediately.");
                     _simulator.Clear();
                     KTGInputSimulator.TryClearInputBuffer();
-                    _lastTargetSlotId = -1;
-                    CurrentStatus = "Switching to urgent defense prompt!";
+                    _lastTargetSlotId = defenseTarget.SlotId;
+                    _lastTargetWord = defenseTarget.Word;
+                    _simulator.EnqueueWord(defenseTarget.Word, _config);
+                    CurrentStatus = $"[DEFENSE SENTENCE] Enqueued: \"{defenseTarget.Word}\"";
                     return;
                 }
 
-                if (KTGStateReader.HasActiveNeedlesTargetOnScreen(out var needlesTarget) &&
+                if (!isCurrentlyDefense && !isCurrentlyNeedles &&
+                    KTGStateReader.HasActiveNeedlesTargetOnScreen(out var needlesTarget) &&
                     needlesTarget != null &&
                     needlesTarget.SlotId != 2 &&
                     !string.Equals(needlesTarget.Word, _simulator.CurrentWord, StringComparison.OrdinalIgnoreCase))
                 {
                     _lastPreemptTime = DateTime.UtcNow;
-                    _log.Information($"[AutoKeyboundBrawler] Emergency Cactuar Needles prompt \"{needlesTarget.Word}\" (Slot {needlesTarget.SlotId}) detected while typing boss! Preempting boss to eliminate Cactuar immediately.");
+                    _log.Information($"[AutoKeyboundBrawler] Emergency Cactuar Needles prompt \"{needlesTarget.Word}\" (Slot {needlesTarget.SlotId}) detected! Preempting current target to eliminate Cactuar immediately.");
                     _simulator.Clear();
                     KTGInputSimulator.TryClearInputBuffer();
-                    _lastTargetSlotId = -1;
-                    CurrentStatus = "Switching to emergency Cactuar target!";
+                    _lastTargetSlotId = needlesTarget.SlotId;
+                    _lastTargetWord = needlesTarget.Word;
+                    _simulator.EnqueueWord(needlesTarget.Word, _config);
+                    CurrentStatus = $"[CACTUAR/NEEDLES] Enqueued: \"{needlesTarget.Word}\"";
                     return;
                 }
             }

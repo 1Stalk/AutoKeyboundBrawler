@@ -123,11 +123,16 @@ public static class KTGWordDatabase
                 if (!isDefense)
                 {
                     if (text.Contains('、') || text.Contains('。') || text.Contains('「') || text.Contains('」') ||
-                        (targetLang == ClientLanguage.Japanese && text.Length >= 12 && !text.Contains("SOLDIER")) ||
                         KTGLocalizationRegistry.ContainsDefenseKeyword(text))
                     {
                         isDefense = true;
                     }
+                }
+
+                // A Cactuar prompt is strictly an enemy to kill and must never be treated as a player shield defense sentence
+                if (isCactuar)
+                {
+                    isDefense = false;
                 }
 
                 var entry = new WordEntry
@@ -224,6 +229,20 @@ public static class KTGWordDatabase
             var pattern = "^" + System.Text.RegularExpressions.Regex.Escape(stripped).Replace("\\*", ".*").Replace("\\?", ".") + "$";
             var regex = new System.Text.RegularExpressions.Regex(pattern, System.Text.RegularExpressions.RegexOptions.IgnoreCase);
             return Entries.FirstOrDefault(e => regex.IsMatch(e.Stripped));
+        }
+
+        // Substring / suffix fallback for quotes or partial phrases (e.g. "しむことはない、星に帰るだけだ" -> "悲しむことはない、星に帰るだけだ")
+        if (normalized.Length >= 6)
+        {
+            var match = Entries.FirstOrDefault(e =>
+                e.Normalized.Contains(normalized) ||
+                normalized.Contains(e.Normalized) ||
+                e.Stripped.Contains(stripped) ||
+                stripped.Contains(e.Stripped));
+            if (match != null)
+            {
+                return match;
+            }
         }
 
         return null;

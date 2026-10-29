@@ -131,32 +131,72 @@ public static class KTGLocalizationRegistry
     // ------------------------------------------------------------------------
     // 4. Needles Spells & Cactuar Identification
     // ------------------------------------------------------------------------
-    public static readonly uint[] CactuarRowIds = [501, 841, 987, 991, 1224, 1453, 1728];
+    public static readonly uint[] CactuarRowIds =
+    [
+        501,  // サボテンダー / Cactuar
+        841,  // ゴールドサボテンダー / Gold Cactuar
+        844,  // コルテンダー
+        845,  // ジャボテンダー / Gigantender
+        950,  // サボテンダー・カーニバル / Cactuar Carnival
+        987,  // サボテン・ノック / Cactuar Knock
+        991,  // ハッピーテンダーチャレンジ / Happy Tender Challenge
+        1224, // 金の針
+        1453, // 針千本 / 1,000 Needles
+        1454, // サボテンばくだん
+        1455, // サボテンまばりあ
+        1728  // サボテンダー千本ノッカー
+    ];
 
-    public static readonly uint[] NeedlesActionIds = [49524, 48580, 48581, 39023];
+    public static readonly uint[] NeedlesActionIds =
+    [
+        49524, // 針？本 (Cast 7.0s, Keybound Brawler)
+        48580, // 針？本 (Cast 8.0s, Keybound Brawler)
+        48581, // 針？本 (Cast 8.0s, Keybound Brawler)
+        39023, // Needles (Dawntrail minigame)
+        501, 502, 503, 2678, 2679, 2680, 3104, 3105, 3106, 10375, 10730, 10731, 10876, 11397, 15087
+    ];
 
     public static readonly string[] LocalizedNeedlesSpellRoots =
     [
-        "needle",       // English (??? Needles, 1,000 Needles, etc.)
-        "stachel",      // German (???-Stacheln)
-        "nadel",        // German (1.000 Nadeln, ??? Nadeln)
-        "épine",        // French (??? Épines, 1 000 épines)
-        "epine",        // French (??? Epines - unaccented fallback)
-        "aiguille",     // French (1000 aiguilles)
-        "針",           // Japanese Kanji (針？本, 針千本, 針幾千本)
-        "はり",         // Japanese Hiragana
-        "???",          // Signature of Cactuar ??? Needles across European localizations
-        "？"            // Fullwidth question mark in Japanese 針？本
+        // English
+        "needle",           // ??? Needles, 1,000 Needles, etc.
+        "??? needles",
+        // Japanese
+        "針？本",           // Fullwidth question mark (Row 49524, 48580, 48581)
+        "針?本",            // ASCII question mark
+        "針千本",
+        "針万本",
+        "針幾万本",
+        "針",               // Kanji root covering needle actions
+        "はり",             // Hiragana root
+        // German
+        "stachel",          // ???-Stacheln
+        "nadel",            // 1.000 Nadeln, ??? Nadeln
+        // French
+        "épine",            // ??? Épines, 1 000 épines
+        "epine",            // unaccented fallback
+        "aiguille"          // 1000 aiguilles
     ];
 
     public static readonly string[] LocalizedCactuarRoots =
     [
-        "cactuar",      // English
-        "サボテンダー",  // Japanese
-        "さぼてんだー",  // Japanese Hiragana
-        "kaktor",       // German
-        "pampa",        // French
-        "sabotender"
+        // English
+        "cactuar",
+        "gigantender",
+        "sabotender",
+        "tender",
+        // Japanese
+        "サボテン",          // Matches サボテンダー, サボテン・ノック, サボテンばくだん, サボテンまばりあ
+        "さぼてん",
+        "テンダー",          // Matches コルテンダー, ジャボテンダー, ハッピーテンダーチャレンジ
+        "てんだー",
+        "ジャボテン",
+        "じゃぼてん",
+        "針千本",
+        // German
+        "kaktor",
+        // French
+        "pampa"
     ];
 
     public static bool IsNeedlesSpell(string? spellName, uint actionId = 0)
@@ -174,8 +214,7 @@ public static class KTGLocalizationRegistry
     public static bool IsCactuarPrompt(string? prompt)
     {
         if (string.IsNullOrWhiteSpace(prompt)) return false;
-        return LocalizedCactuarRoots.Any(root => prompt.Contains(root, StringComparison.OrdinalIgnoreCase)) ||
-               LocalizedNeedlesSpellRoots.Any(root => prompt.Contains(root, StringComparison.OrdinalIgnoreCase));
+        return LocalizedCactuarRoots.Any(root => prompt.Contains(root, StringComparison.OrdinalIgnoreCase));
     }
 
     // ------------------------------------------------------------------------

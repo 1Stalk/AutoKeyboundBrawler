@@ -122,6 +122,29 @@ public static unsafe class AddonKTGEnemyCastBar
 
     public static bool HasActiveNeedlesCast(out KTGActiveCast? needlesCast)
     {
+        // 1. Primary check: Svc.Objects for any live BattleChara actively casting Needles
+        try
+        {
+            foreach (var obj in Svc.Objects)
+            {
+                if (obj is Dalamud.Game.ClientState.Objects.Types.IBattleChara chara && chara.IsCasting)
+                {
+                    var actionId = chara.CastActionId;
+                    var name = Svc.Data.GetExcelSheet<Lumina.Excel.Sheets.Action>()?.GetRowOrDefault(actionId)?.Name.ToString();
+                    if (IsNeedlesSpell(name, actionId))
+                    {
+                        needlesCast = new KTGActiveCast((int)chara.EntityId, name ?? "針？本");
+                        return true;
+                    }
+                }
+            }
+        }
+        catch
+        {
+            // Object table scan safety
+        }
+
+        // 2. Secondary check: KTGEnemyCastBar UI addon
         var casts = ReadActiveCasts();
         needlesCast = casts.FirstOrDefault(c => IsNeedlesSpell(c.SpellName));
         return needlesCast != null;
