@@ -1,16 +1,19 @@
 <!-- Repository Header Begin -->
-<div align="center">
-<img src="images/icon.png" alt="AutoKeyboundBrawler" width="128">
+<p align="center">
+  <img src="images/icon.png" width="128" alt="AutoKeyboundBrawler" />
+</p>
 
-# AutoKeyboundBrawler
+<h1 align="center">AutoKeyboundBrawler</h1>
 
-Type less. Win more.
+<p align="center">
+  <em>Type less. Win more. Automated typing solver for the Keybound Brawler event in FFXIV.</em>
+</p>
 
-Automated typing solver for the Keybound Brawler event in FFXIV.
+---
 
-https://github.com/user-attachments/assets/91bab7d2-9797-4ddb-95b3-ba4bafde052e
-
-</div>
+<p align="center">
+  <img src="images/demo.gif" alt="AutoKeyboundBrawler demo" />
+</p>
 <!-- Repository Header End -->
 
 ## Install
