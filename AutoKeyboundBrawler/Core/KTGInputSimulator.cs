@@ -406,6 +406,11 @@ public unsafe class KTGInputSimulator
         }
 
         var deadKey = GetCircumflexDeadKey();
+        if (deadKey == SeVirtualKey.NO_KEY)
+        {
+            return false;
+        }
+
         queue.Enqueue(new KeyAction(deadKey));
         queue.Enqueue(new KeyAction(baseVowel));
         return true;
@@ -416,65 +421,91 @@ public unsafe class KTGInputSimulator
         var scan = PInvoke.VkKeyScan('^');
         if (scan != -1)
         {
+            var shiftState = (byte)((scan >> 8) & 0xFF);
             var vk = (byte)(scan & 0xFF);
-            if (vk != 0)
+            // Only use hardware dead key if '^' is unshifted on the active layout (e.g. French AZERTY 0xDD or German QWERTZ 0xDC/Wine 0xC0).
+            // On US QWERTY, '^' requires Shift (Shift+6) and is NOT a dead key. Attempting to send it as a dead key
+            // causes key 6 to be pressed unshifted, typing "6e" instead of "ê".
+            if (shiftState == 0 && vk != 0)
             {
                 return (SeVirtualKey)vk;
             }
         }
 
-        // On French AZERTY, VK_OEM_6 (0xDD) is the circumflex dead key
-        return (SeVirtualKey)0xDD;
+        return SeVirtualKey.NO_KEY;
     }
 
     private static bool TryCharToVirtualKey(char c, out SeVirtualKey key, out bool shift)
     {
         shift = false;
 
-        // 1. Direct German QWERTZ OEM virtual key mapping
-        // On German layout: ä/Ä = VK_OEM_7 (0xDE), ö/Ö = VK_OEM_3 (0xC0), ü/Ü = VK_OEM_1 (0xBA), ß = VK_OEM_4 (0xDB)
+        // 1. German QWERTZ characters: ä/Ä, ö/Ö, ü/Ü, ß
+        // Query active keyboard layout first via VkKeyScan (resolves dynamic Wine OEM virtual keys on Linux/Wine).
+        // If unmapped on the active layout (e.g. US QWERTY), returns false so EnqueueWord cleanly falls back
+        // to SendUnicodeChar (WM_CHAR) rather than sending wrong physical keys.
         switch (c)
         {
             case 'ä':
             case 'Ä':
-                key = (SeVirtualKey)0xDE;
-                return true;
             case 'ö':
             case 'Ö':
-                key = (SeVirtualKey)0xC0;
-                return true;
             case 'ü':
             case 'Ü':
-                key = (SeVirtualKey)0xBA;
-                return true;
             case 'ß':
-                key = (SeVirtualKey)0xDB;
-                return true;
+                var germanScan = PInvoke.VkKeyScan(c);
+                if (germanScan == -1 && char.IsUpper(c))
+                {
+                    germanScan = PInvoke.VkKeyScan(char.ToLowerInvariant(c));
+                }
+
+                if (germanScan != -1)
+                {
+                    var vk = (byte)(germanScan & 0xFF);
+                    if (vk != 0)
+                    {
+                        key = (SeVirtualKey)vk;
+                        shift = false; // Keybound Brawler accepts unshifted input for letters
+                        return true;
+                    }
+                }
+
+                key = SeVirtualKey.NO_KEY;
+                return false;
         }
 
-        // 2. Direct French AZERTY OEM virtual key mapping
+        // 2. French AZERTY characters: é/É, è/È, à/À, ç/Ç, ù/Ù
+        // Query active layout first with VkKeyScan, falling back to SendUnicodeChar (WM_CHAR) if unmapped.
         switch (c)
         {
             case 'é':
             case 'É':
-                key = (SeVirtualKey)0x32; // VK_2
-                return true;
             case 'è':
             case 'È':
-                key = (SeVirtualKey)0x37; // VK_7
-                return true;
             case 'à':
             case 'À':
-                key = (SeVirtualKey)0x30; // VK_0
-                return true;
             case 'ç':
             case 'Ç':
-                key = (SeVirtualKey)0x39; // VK_9
-                return true;
             case 'ù':
             case 'Ù':
-                key = (SeVirtualKey)0xC0; // VK_OEM_3
-                return true;
+                var frenchScan = PInvoke.VkKeyScan(c);
+                if (frenchScan == -1 && char.IsUpper(c))
+                {
+                    frenchScan = PInvoke.VkKeyScan(char.ToLowerInvariant(c));
+                }
+
+                if (frenchScan != -1)
+                {
+                    var vk = (byte)(frenchScan & 0xFF);
+                    if (vk != 0)
+                    {
+                        key = (SeVirtualKey)vk;
+                        shift = false;
+                        return true;
+                    }
+                }
+
+                key = SeVirtualKey.NO_KEY;
+                return false;
         }
 
         // 3. Digits '0'..'9': MUST be mapped to top-row number keys (KEY_0..KEY_9, 0x30..0x39).
@@ -514,8 +545,8 @@ public unsafe class KTGInputSimulator
             var vk = (byte)(scan & 0xFF);
             var shiftState = (byte)((scan >> 8) & 0xFF);
             // Only use VkKeyScan if the key does not require modifiers like Shift (shiftState == 0),
-            // OR if it is a standard letter (A-Z) where the game accepts unshifted input.
-            if (vk != 0 && (shiftState == 0 || (c is >= 'a' and <= 'z') || (c is >= 'A' and <= 'Z')))
+            // OR if it is a letter where the game accepts unshifted input.
+            if (vk != 0 && (shiftState == 0 || char.IsLetter(c)))
             {
                 key = (SeVirtualKey)vk;
                 return true;
@@ -587,7 +618,7 @@ public unsafe class KTGInputSimulator
 
     private static class PInvoke
     {
-        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        [DllImport("user32.dll", CharSet = CharSet.Unicode, EntryPoint = "VkKeyScanW")]
         public static extern short VkKeyScan(char ch);
 
         [DllImport("user32.dll")]
