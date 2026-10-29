@@ -6,6 +6,12 @@
 <h1 align="center">AutoKeyboundBrawler</h1>
 
 <p align="center">
+  <a href="https://github.com/1Stalk/AutoKeyboundBrawler/releases">
+    <img src="https://img.shields.io/github/downloads/1Stalk/AutoKeyboundBrawler/total?label=Downloads&color=blue" alt="Downloads" />
+  </a>
+</p>
+
+<p align="center">
   <em>Type less. Win more. Automated typing solver for the Keybound Brawler event in FFXIV.</em>
 </p>
 
