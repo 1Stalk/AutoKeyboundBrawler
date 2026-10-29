@@ -276,7 +276,7 @@ public class KTGAutomationManager
             _lastTargetSlotId = target.SlotId;
             _lastTargetWord = target.Word;
 
-            var isDefense = KTGStateReader.IsDefenseSentence(target.Word, target.SlotId);
+            var isDefense = KTGStateReader.IsDefenseSentence(target.Word, target.SlotId, target.ScreenY);
             var isNeedles = KTGStateReader.IsCactuarWord(target.Word) ||
                             AddonKTGEnemyCastBar.ReadActiveCasts().Any(c => c.SlotId == target.SlotId && AddonKTGEnemyCastBar.IsNeedlesSpell(c.SpellName));
             var isBoss = target.SlotId == 2;

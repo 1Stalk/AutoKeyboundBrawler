@@ -1,7 +1,10 @@
+using Dalamud.Game;
+using ECommons.DalamudServices;
 using FFXIVClientStructs.FFXIV.Client.System.Input;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Linq;
 using System.Runtime.InteropServices;
 
 namespace AutoKeyboundBrawler.Core;
@@ -57,8 +60,20 @@ public unsafe class KTGInputSimulator
             ? Data.KTGWordDatabase.StripPunctuation(word)
             : word).Trim();
 
+        var isJapanese = Svc.ClientState.ClientLanguage == ClientLanguage.Japanese ||
+                         textToType.Any(c => c >= 0x3000);
+
         foreach (var ch in textToType)
         {
+            // For Japanese phrases or Japanese clients, all characters (including numbers, spaces, and punctuation)
+            // MUST be sent via SendUnicodeChar (WM_CHAR). Sending physical keydowns for digits (e.g. KEY_3)
+            // causes the Japanese IME to treat the digit as an IME candidate selection shortcut, wiping preceding Kana!
+            if (isJapanese)
+            {
+                _pendingActions.Enqueue(new KeyAction(ch));
+                continue;
+            }
+
             if (TryEnqueueCircumflex(ch, _pendingActions))
             {
                 continue;

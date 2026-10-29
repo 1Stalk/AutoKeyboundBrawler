@@ -96,7 +96,9 @@ public static class KTGWordDatabase
                             lowerEn.Contains("barrier") ||
                             lowerEn.Contains("shield") ||
                             lowerEn.Contains("protect") ||
-                            enWords.Length >= 3)
+                            enWords.Length >= 3 ||
+                            enText.Contains('、') ||
+                            enText.Contains('。'))
                         {
                             isDefense = true;
                         }
@@ -115,6 +117,17 @@ public static class KTGWordDatabase
                 else
                 {
                     isDefense = KTGLocalizationRegistry.ContainsDefenseKeyword(text);
+                }
+
+                // Additional checks for defense: Japanese quotes and punctuation
+                if (!isDefense)
+                {
+                    if (text.Contains('、') || text.Contains('。') || text.Contains('「') || text.Contains('」') ||
+                        (targetLang == ClientLanguage.Japanese && text.Length >= 12 && !text.Contains("SOLDIER")) ||
+                        KTGLocalizationRegistry.ContainsDefenseKeyword(text))
+                    {
+                        isDefense = true;
+                    }
                 }
 
                 var entry = new WordEntry

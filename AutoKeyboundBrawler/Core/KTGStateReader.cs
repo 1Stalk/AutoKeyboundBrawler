@@ -121,18 +121,27 @@ public static unsafe class KTGStateReader
 
     /// <summary>
     /// Checks if a given target is a true Defensive Sentence / Player Shield Prompt:
-    /// - SlotId == 2 is STRICTLY the Boss and can NEVER be a player defensive prompt.
+    /// - SlotId == 2 is STRICTLY the Boss enemy. The Boss can NEVER be a player defensive prompt.
+    /// - SlotId >= 20000 or screenY >= 700f: Dedicated player defensive prompt in KTGEWord.
     /// - Checks KTGWordDatabase cross-language defense flag (1:1 row sync with English sheet).
     /// - Localized defense keywords via KTGLocalizationRegistry.
+    /// - Japanese sentence punctuation (、, 。, 「, 」) or Japanese quote length.
     /// - Full sentence structure (3 or more words for EN, DE, FR).
     /// Never matches single-word or 2-word adds like "whisper", "Tifa", "SOLDIER", "Cloud Jr.".
     /// </summary>
-    public static bool IsDefenseSentence(string word, int slotId = -1)
+    public static bool IsDefenseSentence(string word, int slotId = -1, float screenY = 0f)
     {
         // Slot 2 in KTGEWord is strictly the Boss enemy. The Boss can NEVER be a player defensive prompt!
         if (slotId == 2)
         {
             return false;
+        }
+
+        // Dedicated player defensive prompt slot in KTGEWord UI (NodeId >= 20000)
+        // or player shield prompt positioned at the bottom of the screen (ScreenY >= 700)
+        if (slotId >= 20000 || screenY >= 700f)
+        {
+            return true;
         }
 
         if (string.IsNullOrWhiteSpace(word)) return false;
@@ -150,7 +159,14 @@ public static unsafe class KTGStateReader
             return true;
         }
 
-        // 3. Full quote / sentence structure (3 or more words for space-separated languages)
+        // 3. Japanese sentence punctuation (comma, period, quotes) or Japanese quote length
+        if (word.Contains('、') || word.Contains('。') || word.Contains('「') || word.Contains('」') ||
+            (word.Any(c => c >= 0x3000) && word.Length >= 12 && !word.Contains("SOLDIER")))
+        {
+            return true;
+        }
+
+        // 4. Full quote / sentence structure (3 or more words for space-separated languages)
         var words = word.Split(' ', StringSplitOptions.RemoveEmptyEntries);
         if (words.Length >= 3)
         {
@@ -183,12 +199,12 @@ public static unsafe class KTGStateReader
     public static bool HasActiveDefenseSentenceOnScreen(out KTGTargetWord? defenseTarget)
     {
         var targets = AddonKTGEWord.ReadActiveTargets();
-        defenseTarget = targets.FirstOrDefault(t => t.SlotId != 2 && IsDefenseSentence(t.Word, t.SlotId));
+        defenseTarget = targets.FirstOrDefault(t => t.SlotId != 2 && IsDefenseSentence(t.Word, t.SlotId, t.ScreenY));
         if (defenseTarget != null) return true;
 
         var cutoff = DateTime.UtcNow.AddSeconds(-4.0);
         var cached = _targetCache.Values
-            .FirstOrDefault(c => c.SlotId != 2 && c.LastSeenUtc >= cutoff && IsDefenseSentence(c.Word, c.SlotId));
+            .FirstOrDefault(c => c.SlotId != 2 && c.LastSeenUtc >= cutoff && IsDefenseSentence(c.Word, c.SlotId, c.ScreenY));
         if (cached != null)
         {
             defenseTarget = new KTGTargetWord(cached.SlotId, cached.Word, cached.ScreenY, cached.ScreenX);
@@ -239,7 +255,7 @@ public static unsafe class KTGStateReader
     {
         var targets = AddonKTGEWord.ReadActiveTargets();
         var hasBoss = targets.Any(t => t.SlotId == 2);
-        return hasBoss && targets.Any(t => t.SlotId != 2 && !IsDefenseSentence(t.Word, t.SlotId));
+        return hasBoss && targets.Any(t => t.SlotId != 2 && !IsDefenseSentence(t.Word, t.SlotId, t.ScreenY));
     }
 
     /// <summary>
@@ -261,7 +277,7 @@ public static unsafe class KTGStateReader
         Configuration config)
     {
         // Tier 0: Defensive Sentence (strictly non-boss slots only!)
-        if (config.PrioritizeDefense && target.SlotId != 2 && IsDefenseSentence(target.Word, target.SlotId))
+        if (config.PrioritizeDefense && target.SlotId != 2 && IsDefenseSentence(target.Word, target.SlotId, target.ScreenY))
         {
             return 0;
         }
