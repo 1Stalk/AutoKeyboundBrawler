@@ -5,7 +5,7 @@
     "Punchline": "Automated assistant and typing solver for Keybound Brawler.",
     "Description": "Automates Keybound Brawler with human-like typing, AFK loop, multi-language (EN/DE/FR/JA), and penalty safety pauses.",
     "InternalName": "AutoKeyboundBrawler",
-    "AssemblyVersion": "1.0.1.6",
+    "AssemblyVersion": "1.0.2.0",
     "RepoUrl": "https://github.com/1Stalk/AutoKeyboundBrawler",
     "ApplicableVersion": "any",
     "DalamudApiLevel": 15,
