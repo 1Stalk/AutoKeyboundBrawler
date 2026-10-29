@@ -120,9 +120,26 @@ public static unsafe class AddonKTGEnemyCastBar
         return KTGLocalizationRegistry.IsNeedlesSpell(spellName, actionId);
     }
 
-    public static bool HasActiveNeedlesCast(out KTGActiveCast? needlesCast)
+    /// <summary>
+    /// Checks if an active Cactuar is currently casting Needles, querying both UI castbar and live BattleChara objects.
+    /// Exposes the live BattleChara (if found in memory) and the UI slot ID (if found in KTGEnemyCastBar).
+    /// </summary>
+    public static bool TryGetNeedlesCastingChara(out Dalamud.Game.ClientState.Objects.Types.IBattleChara? castingChara, out string spellName, out int uiSlotId)
     {
-        // 1. Primary check: Svc.Objects for any live BattleChara actively casting Needles
+        castingChara = null;
+        spellName = "針？本";
+        uiSlotId = -1;
+
+        // 1. Check UI castbar
+        var casts = ReadActiveCasts();
+        var uiCast = casts.FirstOrDefault(c => IsNeedlesSpell(c.SpellName));
+        if (uiCast != null)
+        {
+            uiSlotId = uiCast.SlotId;
+            spellName = uiCast.SpellName;
+        }
+
+        // 2. Check Svc.Objects for BattleChara
         try
         {
             foreach (var obj in Svc.Objects)
@@ -133,7 +150,8 @@ public static unsafe class AddonKTGEnemyCastBar
                     var name = Svc.Data.GetExcelSheet<Lumina.Excel.Sheets.Action>()?.GetRowOrDefault(actionId)?.Name.ToString();
                     if (IsNeedlesSpell(name, actionId))
                     {
-                        needlesCast = new KTGActiveCast((int)chara.EntityId, name ?? "針？本");
+                        castingChara = chara;
+                        spellName = name ?? "針？本";
                         return true;
                     }
                 }
@@ -144,15 +162,24 @@ public static unsafe class AddonKTGEnemyCastBar
             // Object table scan safety
         }
 
-        // 2. Secondary check: KTGEnemyCastBar UI addon
-        var casts = ReadActiveCasts();
-        needlesCast = casts.FirstOrDefault(c => IsNeedlesSpell(c.SpellName));
-        return needlesCast != null;
+        return uiSlotId > 0;
+    }
+
+    public static bool HasActiveNeedlesCast(out KTGActiveCast? needlesCast)
+    {
+        if (TryGetNeedlesCastingChara(out var chara, out var spellName, out var uiSlotId))
+        {
+            needlesCast = new KTGActiveCast(uiSlotId > 0 ? uiSlotId : (int)(chara?.EntityId ?? 0), spellName);
+            return true;
+        }
+
+        needlesCast = null;
+        return false;
     }
 
     /// <summary>
     /// Checks if a spell name or action ID corresponds to the actual Halt casts:
-    /// - Dynamic Sensory Jammer (ID 49702)
+    /// - Dynamic Sensory Jammer (ID 49702, 49532)
     /// - Cursed Gaze (ID 49529)
     /// Supports all client localizations via KTGLocalizationRegistry.
     /// </summary>

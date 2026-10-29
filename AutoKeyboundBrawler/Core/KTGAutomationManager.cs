@@ -227,12 +227,12 @@ public class KTGAutomationManager
             // Preemption checks when typing non-defensive target:
             // 1) Urgent Defensive Sentence to survive incoming boss ultimate/tankbuster.
             // 2) Emergency Cactuar Needles cast to eliminate Cactuar immediately.
-            var isDefense = _isCurrentlyTypingDefense || KTGStateReader.IsDefenseSentence(_simulator.CurrentWord, _lastTargetSlotId);
-            var isNeedles = _isCurrentlyTypingNeedles || KTGStateReader.IsCactuarWord(_simulator.CurrentWord);
+            var isTypingDefense = _isCurrentlyTypingDefense;
+            var isTypingNeedles = _isCurrentlyTypingNeedles;
 
-            if ((DateTime.UtcNow - _lastPreemptTime).TotalMilliseconds > 400)
+            if ((DateTime.UtcNow - _lastPreemptTime).TotalMilliseconds > 250)
             {
-                if (!isDefense &&
+                if (!isTypingDefense &&
                     _config.PrioritizeDefense &&
                     _config.AbortForDefense &&
                     KTGStateReader.HasActiveDefenseSentenceOnScreen(out var defenseTarget, _lastSubmittedWord, submitAgeMs) &&
@@ -253,7 +253,7 @@ public class KTGAutomationManager
                     return;
                 }
 
-                if (!isDefense && !isNeedles &&
+                if (!isTypingDefense && !isTypingNeedles &&
                     KTGStateReader.HasActiveNeedlesTargetOnScreen(out var needlesTarget) &&
                     needlesTarget != null &&
                     needlesTarget.SlotId != 2 &&
@@ -297,7 +297,7 @@ public class KTGAutomationManager
 
             var isDefense = KTGStateReader.IsDefenseSentence(target.Word, target.SlotId, target.ScreenY);
             var isNeedles = KTGStateReader.IsCactuarWord(target.Word) ||
-                            AddonKTGEnemyCastBar.ReadActiveCasts().Any(c => c.SlotId == target.SlotId && AddonKTGEnemyCastBar.IsNeedlesSpell(c.SpellName));
+                            (KTGStateReader.HasActiveNeedlesTargetOnScreen(out var activeNeedles) && activeNeedles?.SlotId == target.SlotId);
             var isBoss = target.SlotId == 2;
             var tag = isDefense ? "[DEFENSE SENTENCE]" : (isNeedles ? "[CACTUAR/NEEDLES]" : (isBoss ? "[BOSS]" : "[ADD/MOB]"));
 

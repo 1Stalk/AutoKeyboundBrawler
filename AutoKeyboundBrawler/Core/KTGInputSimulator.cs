@@ -56,12 +56,23 @@ public unsafe class KTGInputSimulator
         _isSubmittingWord = false;
         JustSubmitted = false;
 
-        var textToType = (config.IgnorePunctuation
+        var isJapanese = (Svc.ClientState != null && Svc.ClientState.ClientLanguage == ClientLanguage.Japanese) ||
+                         word.Any(c => (c >= 0x3000 && c <= 0x9FFF) || (c >= 0xFF00 && c <= 0xFFEF));
+
+        // In Japanese, Keybound Brawler prompts strictly require exact character input,
+        // including fullwidth tildes/wave dashes (～), middle dots (・), exclamation marks (！),
+        // question marks (？), and commas (、). Stripping punctuation causes the minigame to fail the input check.
+        // IgnorePunctuation is strictly for Latin-script languages (e.g. English apostrophes/hyphens).
+        var textToType = (config.IgnorePunctuation && !isJapanese
             ? Data.KTGWordDatabase.StripPunctuation(word)
             : word).Trim();
 
-        var isJapanese = Svc.ClientState.ClientLanguage == ClientLanguage.Japanese ||
-                         textToType.Any(c => c >= 0x3000);
+        // For Japanese phrases, normalize wave dash (U+301C) to fullwidth tilde (U+FF5E)
+        // to strictly match FFXIV's Lumina KTGTypeWordTextData game sheet encoding.
+        if (isJapanese)
+        {
+            textToType = textToType.Replace('\u301C', '\uFF5E');
+        }
 
         foreach (var ch in textToType)
         {

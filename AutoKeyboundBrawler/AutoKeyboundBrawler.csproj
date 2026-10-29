@@ -2,7 +2,7 @@
 <Project Sdk="Dalamud.NET.Sdk/15.0.0">
     <PropertyGroup>
         <Authors>1Stalk</Authors>
-        <Version>1.0.1.4</Version>
+        <Version>1.0.1.6</Version>
         <Description>Automated assistant and typing solver for Keybound Brawler.</Description>
         <AssemblyName>AutoKeyboundBrawler</AssemblyName>
         <RootNamespace>AutoKeyboundBrawler</RootNamespace>
@@ -33,8 +33,6 @@
         </ItemGroup>
         <Copy SourceFiles="@(SyncFiles)" DestinationFolder="$(ProjectDir)bin\Debug\" Condition="'$(Configuration)' == 'Debug'" ContinueOnError="true" />
         <Copy SourceFiles="@(SyncFiles)" DestinationFolder="$(ProjectDir)bin\x64\Debug\" Condition="'$(Configuration)' == 'Debug'" ContinueOnError="true" />
-        <Copy SourceFiles="$(ProjectDir)AutoKeyboundBrawler.json" DestinationFolder="$(ProjectDir)bin\Debug\" Condition="'$(Configuration)' == 'Debug'" ContinueOnError="true" />
-        <Copy SourceFiles="$(ProjectDir)AutoKeyboundBrawler.json" DestinationFolder="$(ProjectDir)bin\x64\Debug\" Condition="'$(Configuration)' == 'Debug'" ContinueOnError="true" />
         <Copy SourceFiles="@(SyncImageFiles)" DestinationFolder="$(ProjectDir)bin\Debug\images\" Condition="'$(Configuration)' == 'Debug'" ContinueOnError="true" />
         <Copy SourceFiles="@(SyncImageFiles)" DestinationFolder="$(ProjectDir)bin\x64\Debug\images\" Condition="'$(Configuration)' == 'Debug'" ContinueOnError="true" />
     </Target>

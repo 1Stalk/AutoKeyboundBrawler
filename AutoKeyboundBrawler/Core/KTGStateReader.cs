@@ -1,6 +1,7 @@
 using AutoKeyboundBrawler.Data;
 using AutoKeyboundBrawler.Interop;
 using Dalamud.Game.ClientState.Conditions;
+using Dalamud.Game.ClientState.Objects.Types;
 using ECommons.DalamudServices;
 using FFXIVClientStructs.FFXIV.Client.Enums;
 using FFXIVClientStructs.FFXIV.Client.Game.UI;
@@ -122,12 +123,12 @@ public static unsafe class KTGStateReader
     /// <summary>
     /// Checks if a given target is a true Defensive Sentence / Player Shield Prompt:
     /// - SlotId == 2 is STRICTLY the Boss enemy. The Boss can NEVER be a player defensive prompt.
-    /// - SlotId >= 20000 or screenY >= 680f: Dedicated player defensive prompt in KTGEWord.
-    /// - Checks KTGWordDatabase cross-language defense flag (1:1 row sync with English sheet).
-    /// - Localized defense keywords via KTGLocalizationRegistry.
-    /// - Japanese sentence punctuation (、, 。, 「, 」) or Japanese quote length.
-    /// - Full sentence structure (3 or more words for EN, DE, FR).
-    /// Never matches single-word or 2-word adds like "whisper", "Tifa", "SOLDIER", "Cloud Jr.".
+    /// - SlotId >= 20000: Dedicated player defensive prompt slot in KTGEWord.
+    /// - Checks KTGWordDatabase defense flag (accurately resolved via Lumina sheets).
+    /// - Localized defense keywords via KTGLocalizationRegistry (e.g. "防御", "シールド").
+    /// - Japanese full quotes with brackets 「...」.
+    /// - Full sentence structure (3 or more space-separated words for EN, DE, FR).
+    /// Never matches normal wave mobs like "サボテンダー", "マバリア", "防弾チョッキ", "しみる～".
     /// </summary>
     public static bool IsDefenseSentence(string word, int slotId = -1, float screenY = 0f)
     {
@@ -137,15 +138,15 @@ public static unsafe class KTGStateReader
             return false;
         }
 
-        // Dedicated player defensive prompt in KTGEWord UI is positioned at the bottom of the screen (ScreenY >= 700)
-        if (screenY >= 680f)
+        if (string.IsNullOrWhiteSpace(word)) return false;
+
+        // Dedicated player defensive prompt slot in KTGEWord UI (if used)
+        if (slotId >= 20000)
         {
             return true;
         }
 
-        if (string.IsNullOrWhiteSpace(word)) return false;
-
-        // 1. Check loaded database entry (which resolved defense cross-language via English sheet row matching)
+        // 1. Check loaded database entry (which resolved defense prompts accurately)
         var match = KTGWordDatabase.FindMatch(word);
         if (match != null && match.IsDefense)
         {
@@ -158,8 +159,8 @@ public static unsafe class KTGStateReader
             return true;
         }
 
-        // 3. Japanese sentence punctuation (comma, period, quotes)
-        if (word.Contains('、') || word.Contains('。') || word.Contains('「') || word.Contains('」'))
+        // 3. Japanese full quotation brackets 「...」
+        if (word.Contains('「') && word.Contains('」'))
         {
             return true;
         }
@@ -168,7 +169,10 @@ public static unsafe class KTGStateReader
         var words = word.Split(' ', StringSplitOptions.RemoveEmptyEntries);
         if (words.Length >= 3)
         {
-            return true;
+            if (!KTGLocalizationRegistry.IsCactuarPrompt(word))
+            {
+                return true;
+            }
         }
 
         return false;
@@ -192,8 +196,9 @@ public static unsafe class KTGStateReader
     }
 
     /// <summary>
-    /// Checks if an active defensive prompt is currently visible on screen.
-    /// Excludes recently submitted defense words to prevent false preemption while shield animations linger.
+    /// Checks if two target words represent the same word/prompt.
+    /// Uses exact equality, punctuation-stripped equality, and database row matching.
+    /// Avoids loose substring containment to prevent false positives between unrelated words.
     /// </summary>
     public static bool IsSameWord(string? wordA, string? wordB)
     {
@@ -213,7 +218,7 @@ public static unsafe class KTGStateReader
 
     /// <summary>
     /// Checks if an active defensive prompt is currently visible on screen.
-    /// Excludes recently submitted defense words for 4.5 seconds while shield animations play
+    /// Excludes recently submitted defense words for 1.2 seconds while shield animations play
     /// to prevent false preemption loops.
     /// </summary>
     public static bool HasActiveDefenseSentenceOnScreen(out KTGTargetWord? defenseTarget, string? recentlySubmittedWord = null, double recentSubmitAgeMs = 9999)
@@ -221,14 +226,14 @@ public static unsafe class KTGStateReader
         var targets = AddonKTGEWord.ReadActiveTargets();
         defenseTarget = targets.FirstOrDefault(t => t.SlotId != 2 &&
             IsDefenseSentence(t.Word, t.SlotId, t.ScreenY) &&
-            !(recentSubmitAgeMs < 4500 && IsSameWord(t.Word, recentlySubmittedWord)));
+            !(recentSubmitAgeMs < 1200 && IsSameWord(t.Word, recentlySubmittedWord)));
         if (defenseTarget != null) return true;
 
-        var cutoff = DateTime.UtcNow.AddSeconds(-4.0);
+        var cutoff = DateTime.UtcNow.AddSeconds(-2.0);
         var cached = _targetCache.Values
             .FirstOrDefault(c => c.SlotId != 2 && c.LastSeenUtc >= cutoff &&
                 IsDefenseSentence(c.Word, c.SlotId, c.ScreenY) &&
-                !(recentSubmitAgeMs < 4500 && IsSameWord(c.Word, recentlySubmittedWord)));
+                !(recentSubmitAgeMs < 1200 && IsSameWord(c.Word, recentlySubmittedWord)));
         if (cached != null)
         {
             defenseTarget = new KTGTargetWord(cached.SlotId, cached.Word, cached.ScreenY, cached.ScreenX);
@@ -240,36 +245,60 @@ public static unsafe class KTGStateReader
 
     /// <summary>
     /// Checks if an active Cactuar casting "Needles" (or with Cactuar phrase) is currently visible on screen.
+    /// Uses 3D WorldToScreen projection from Svc.Objects to link the casting Cactuar to its on-screen KTGEWord prompt.
     /// </summary>
     public static bool HasActiveNeedlesTargetOnScreen(out KTGTargetWord? needlesTarget)
     {
-        var isNeedlesCasting = AddonKTGEnemyCastBar.HasActiveNeedlesCast(out var needlesCast);
         var targets = AddonKTGEWord.ReadActiveTargets();
+        var nonBossTargets = targets.Where(t => t.SlotId != 2).ToList();
 
-        // 1. If Needles is actively being cast (verified via Svc.Objects or UI castbar)
-        if (isNeedlesCasting)
+        // 1. Check if Needles is being cast via Svc.Objects or UI castbar
+        if (AddonKTGEnemyCastBar.TryGetNeedlesCastingChara(out var castingChara, out var spellName, out var uiSlotId))
         {
-            // Highest confidence: Live add on screen whose word is a Cactuar word
-            needlesTarget = targets.FirstOrDefault(t => t.SlotId != 2 && IsCactuarWord(t.Word));
-            if (needlesTarget != null) return true;
-
-            // Direct slot match from castbar
-            if (needlesCast != null)
+            // A. Direct UI slot match if available from KTGEnemyCastBar
+            if (uiSlotId > 0)
             {
-                needlesTarget = targets.FirstOrDefault(t => t.SlotId != 2 && t.SlotId == needlesCast.SlotId);
+                needlesTarget = nonBossTargets.FirstOrDefault(t => t.SlotId == uiSlotId);
                 if (needlesTarget != null) return true;
             }
 
-            // Fallback: If only 1 non-boss add exists while Needles is casting, that add is the Cactuar
-            var nonBossTargets = targets.Where(t => t.SlotId != 2 && !IsDefenseSentence(t.Word, t.SlotId, t.ScreenY)).ToList();
+            // B. 3D WorldToScreen spatial match: map casting Cactuar directly to the nearest KTGEWord node on screen!
+            if (castingChara != null && nonBossTargets.Count > 0)
+            {
+                try
+                {
+                    if (Svc.GameGui.WorldToScreen(castingChara.Position, out var screenPos))
+                    {
+                        var closestTarget = nonBossTargets
+                            .OrderBy(t => Math.Pow(t.ScreenX - screenPos.X, 2) + Math.Pow(t.ScreenY - screenPos.Y, 2))
+                            .FirstOrDefault();
+
+                        if (closestTarget != null)
+                        {
+                            needlesTarget = closestTarget;
+                            return true;
+                        }
+                    }
+                }
+                catch
+                {
+                    // Fall through on GUI projection error
+                }
+            }
+
+            // C. Keyword match on word
+            needlesTarget = nonBossTargets.FirstOrDefault(t => IsCactuarWord(t.Word));
+            if (needlesTarget != null) return true;
+
+            // D. Fallback: If only 1 non-boss add exists while Needles is casting, that add is the Cactuar
             if (nonBossTargets.Count == 1)
             {
                 needlesTarget = nonBossTargets[0];
                 return true;
             }
 
-            // Fallback to cached memory if briefly obscured
-            var cutoff = DateTime.UtcNow.AddSeconds(-4.0);
+            // E. Fallback to cached memory if briefly obscured
+            var cutoff = DateTime.UtcNow.AddSeconds(-3.0);
             var cached = _targetCache.Values
                 .FirstOrDefault(c => c.SlotId != 2 && c.LastSeenUtc >= cutoff && IsCactuarWord(c.Word));
             if (cached != null)
@@ -279,19 +308,19 @@ public static unsafe class KTGStateReader
             }
         }
 
-        // 2. Direct slot match from castbar even if Svc.Objects did not catch it
+        // 2. Direct slot match from castbar
         var casts = AddonKTGEnemyCastBar.ReadActiveCasts();
         var needleSlots = casts
             .Where(c => AddonKTGEnemyCastBar.IsNeedlesSpell(c.SpellName))
             .Select(c => c.SlotId)
             .ToHashSet();
 
-        needlesTarget = targets.FirstOrDefault(t => t.SlotId != 2 && needleSlots.Contains(t.SlotId));
+        needlesTarget = nonBossTargets.FirstOrDefault(t => needleSlots.Contains(t.SlotId));
         if (needlesTarget != null) return true;
 
         // 3. Target whose word matches Cactuar and is actively casting any spell
         var castingSlots = casts.Select(c => c.SlotId).ToHashSet();
-        needlesTarget = targets.FirstOrDefault(t => t.SlotId != 2 && castingSlots.Contains(t.SlotId) && IsCactuarWord(t.Word));
+        needlesTarget = nonBossTargets.FirstOrDefault(t => castingSlots.Contains(t.SlotId) && IsCactuarWord(t.Word));
         if (needlesTarget != null) return true;
 
         needlesTarget = null;
@@ -325,6 +354,7 @@ public static unsafe class KTGStateReader
         HashSet<int> needleSlotIds,
         HashSet<int> otherCastingSlotIds,
         bool isAnyNeedlesCasting,
+        int? needlesTargetSlotId,
         Configuration config)
     {
         // Tier 0: Defensive Sentence (strictly non-boss slots only!)
@@ -336,7 +366,8 @@ public static unsafe class KTGStateReader
         // Tier 1: Cactuar casting "??? Needles" / "針？本" (EMERGENCY INTERRUPT - highest kill priority!)
         if (target.SlotId != 2)
         {
-            if (needleSlotIds.Contains(target.SlotId) ||
+            if ((needlesTargetSlotId.HasValue && target.SlotId == needlesTargetSlotId.Value) ||
+                needleSlotIds.Contains(target.SlotId) ||
                 (isAnyNeedlesCasting && IsCactuarWord(target.Word)) ||
                 (otherCastingSlotIds.Contains(target.SlotId) && IsCactuarWord(target.Word)))
             {
@@ -382,7 +413,7 @@ public static unsafe class KTGStateReader
     /// Selects the best active target word currently verified on screen using
     /// priority hierarchy: Defense Sentences > Cactuar Needles > Other Casting Adds > Regular Adds > Boss.
     /// When selecting among regular mobs/adds, prioritizes the lowest enemy on screen
-    /// (closest to the players' wall).
+    /// (closest to the players' wall, ScreenY descending).
     /// If phrases are obscured/hidden by confusion debuff, falls back to short-term target memory.
     /// </summary>
     public static KTGTargetWord? GetBestTarget(
@@ -401,8 +432,10 @@ public static unsafe class KTGStateReader
 
         // 1. ABSOLUTE SECOND PRIORITY: Cactuar casting Needles (Emergency Interrupt)
         // If a Cactuar is actively casting Needles / 針？本, IMMEDIATELY kill it before regular adds and boss!
+        int? needlesTargetSlotId = null;
         if (HasActiveNeedlesTargetOnScreen(out var needlesTarget) && needlesTarget != null)
         {
+            needlesTargetSlotId = needlesTarget.SlotId;
             var match = KTGWordDatabase.FindMatch(needlesTarget.Word);
             return needlesTarget with { Word = match?.Original ?? needlesTarget.Word };
         }
@@ -507,7 +540,7 @@ public static unsafe class KTGStateReader
         // 3. Shorter word length as tie-breaker
         var isAnyNeedlesCasting = AddonKTGEnemyCastBar.HasActiveNeedlesCast(out _);
         var sorted = candidates
-            .OrderBy(t => GetTargetPriority(t, hasBossOnScreen, needleSlotIds, otherCastingSlotIds, isAnyNeedlesCasting, config))
+            .OrderBy(t => GetTargetPriority(t, hasBossOnScreen, needleSlotIds, otherCastingSlotIds, isAnyNeedlesCasting, needlesTargetSlotId, config))
             .ThenByDescending(t => t.ScreenY)
             .ThenBy(t => t.Word.Length)
             .ToList();

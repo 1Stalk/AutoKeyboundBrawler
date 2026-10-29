@@ -1,9 +1,10 @@
 using Dalamud.Game;
 using Dalamud.Plugin.Services;
-using ECommons.DalamudServices;
 using Lumina.Excel.Sheets;
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 
 namespace AutoKeyboundBrawler.Data;
@@ -21,42 +22,38 @@ public class WordEntry
 
 public static class KTGWordDatabase
 {
-    private static readonly List<WordEntry> Entries = [];
-    private static readonly Dictionary<string, WordEntry> ByExactMatch = new(StringComparer.OrdinalIgnoreCase);
-    private static readonly Dictionary<string, WordEntry> ByStrippedMatch = new(StringComparer.OrdinalIgnoreCase);
-    private static readonly Dictionary<uint, WordEntry> ByRowId = [];
-
     public static bool IsLoaded { get; private set; }
-    public static int Count => Entries.Count;
     public static ClientLanguage CurrentLanguage { get; private set; } = ClientLanguage.English;
 
-    public static bool Load(IDataManager dataManager, IPluginLog? log = null, ClientLanguage? forcedLanguage = null)
+    private static readonly List<WordEntry> Entries = new();
+    private static readonly ConcurrentDictionary<uint, WordEntry> ByRowId = new();
+    private static readonly ConcurrentDictionary<string, WordEntry> ByExactMatch = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly ConcurrentDictionary<string, WordEntry> ByStrippedMatch = new(StringComparer.OrdinalIgnoreCase);
+
+    public static bool Load(IDataManager? data, IPluginLog? log = null)
     {
-        var targetLang = forcedLanguage ?? Svc.ClientState.ClientLanguage;
-        if (IsLoaded && Entries.Count > 0 && CurrentLanguage == targetLang)
-        {
-            return true;
-        }
+        if (data == null) return false;
+
+        var targetLang = data.Language;
 
         try
         {
-            // 1. Get sheet for client's active language
-            var sheet = dataManager.GetExcelSheet<KTGTypeWordTextData>(targetLang) ??
-                        dataManager.GetExcelSheet<KTGTypeWordTextData>();
-
+            var sheet = data.GetExcelSheet<KTGTypeWordTextData>(targetLang);
             if (sheet == null)
             {
-                log?.Error($"[KTGWordDatabase] Failed to open Excel sheet KTGTypeWordTextData for language {targetLang}.");
+                log?.Error($"[KTGWordDatabase] Failed to open KTGTypeWordTextData sheet for language {targetLang}.");
                 return false;
             }
 
-            // 2. Also open English sheet to reliably establish defense and cactuar flags across all languages
-            var englishSheet = dataManager.GetExcelSheet<KTGTypeWordTextData>(ClientLanguage.English);
+            // Retrieve English sheet for cross-language heuristics
+            var englishSheet = targetLang != ClientLanguage.English
+                ? data.GetExcelSheet<KTGTypeWordTextData>(ClientLanguage.English)
+                : sheet;
 
             Entries.Clear();
+            ByRowId.Clear();
             ByExactMatch.Clear();
             ByStrippedMatch.Clear();
-            ByRowId.Clear();
 
             foreach (var row in sheet)
             {
@@ -77,63 +74,28 @@ public static class KTGWordDatabase
                 var normalized = text.ToLowerInvariant();
                 var stripped = StripPunctuation(normalized);
 
-                // Compute defense flag based on English sheet metadata
-                var isDefense = false;
                 var isCactuar = KTGLocalizationRegistry.CactuarRowIds.Contains(row.RowId) ||
                                 KTGLocalizationRegistry.IsCactuarPrompt(text);
 
-                if (englishSheet != null)
+                // Compute defense flag strictly to avoid false positives on normal wave mobs
+                var isDefense = false;
+                if (!isCactuar)
                 {
-                    try
+                    var enText = string.Empty;
+                    if (englishSheet != null)
                     {
-                        var enRow = englishSheet.GetRow(row.RowId);
-                        var enText = enRow.Unknown0.ExtractText()?.Trim() ?? string.Empty;
-                        var lowerEn = enText.ToLowerInvariant();
-                        var enWords = enText.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-
-                        if (lowerEn.Contains("defense") ||
-                            lowerEn.Contains("defend") ||
-                            lowerEn.Contains("barrier") ||
-                            lowerEn.Contains("shield") ||
-                            lowerEn.Contains("protect") ||
-                            enWords.Length >= 3 ||
-                            enText.Contains('、') ||
-                            enText.Contains('。'))
+                        try
                         {
-                            isDefense = true;
+                            var enRow = englishSheet.GetRow(row.RowId);
+                            enText = enRow.Unknown0.ExtractText()?.Trim() ?? string.Empty;
                         }
-
-                        if (!isCactuar && (lowerEn.Contains("cactuar") || lowerEn.Contains("needle")))
+                        catch
                         {
-                            isCactuar = true;
+                            // English row fallback
                         }
                     }
-                    catch
-                    {
-                        // Fallback to local text check
-                        isDefense = KTGLocalizationRegistry.ContainsDefenseKeyword(text);
-                    }
-                }
-                else
-                {
-                    isDefense = KTGLocalizationRegistry.ContainsDefenseKeyword(text);
-                }
 
-                // Additional checks for defense: Japanese quotes, punctuation, or long quote structure
-                if (!isDefense && !isCactuar)
-                {
-                    if (text.Contains('、') || text.Contains('。') || text.Contains('「') || text.Contains('」') ||
-                        (targetLang == ClientLanguage.Japanese && text.Length >= 10) ||
-                        KTGLocalizationRegistry.ContainsDefenseKeyword(text))
-                    {
-                        isDefense = true;
-                    }
-                }
-
-                // A Cactuar prompt is strictly an enemy to kill and must never be treated as a player shield defense sentence
-                if (isCactuar)
-                {
-                    isDefense = false;
+                    isDefense = DetermineIsDefense(row.RowId, text, enText);
                 }
 
                 var entry = new WordEntry
@@ -152,16 +114,27 @@ public static class KTGWordDatabase
                 ByExactMatch.TryAdd(normalized, entry);
                 ByStrippedMatch.TryAdd(stripped, entry);
 
+                // Index wave dash (U+301C) alternate if fullwidth tilde (U+FF5E) is present
+                if (normalized.Contains('\uFF5E'))
+                {
+                    ByExactMatch.TryAdd(normalized.Replace('\uFF5E', '\u301C'), entry);
+                }
+
                 if (!string.IsNullOrWhiteSpace(reading))
                 {
-                    ByExactMatch.TryAdd(reading.ToLowerInvariant(), entry);
-                    ByStrippedMatch.TryAdd(StripPunctuation(reading.ToLowerInvariant()), entry);
+                    var normReading = reading.ToLowerInvariant();
+                    ByExactMatch.TryAdd(normReading, entry);
+                    ByStrippedMatch.TryAdd(StripPunctuation(normReading), entry);
+                    if (normReading.Contains('\uFF5E'))
+                    {
+                        ByExactMatch.TryAdd(normReading.Replace('\uFF5E', '\u301C'), entry);
+                    }
                 }
             }
 
             CurrentLanguage = targetLang;
             IsLoaded = true;
-            log?.Information($"[KTGWordDatabase] Successfully loaded {Entries.Count} words for language {CurrentLanguage}.");
+            log?.Information($"[KTGWordDatabase] Successfully loaded {Entries.Count} words for language {CurrentLanguage} (Defense: {Entries.Count(e => e.IsDefense)}).");
             return true;
         }
         catch (Exception ex)
@@ -171,16 +144,77 @@ public static class KTGWordDatabase
         }
     }
 
-    public static WordEntry? GetByRowId(uint rowId)
+    private static bool DetermineIsDefense(uint rowId, string localText, string enText)
     {
-        return ByRowId.TryGetValue(rowId, out var entry) ? entry : null;
+        var lowerLocal = localText.ToLowerInvariant();
+        var lowerEn = enText.ToLowerInvariant();
+        var enWords = enText.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+
+        // Magic pot items are enemy requests, never player defense
+        if (localText.EndsWith("ちょうだい！") || lowerEn.StartsWith("gimme "))
+        {
+            return false;
+        }
+
+        // Mobs / enemies with barrier in name
+        if (localText is "バリア" or "マバリア" or "デバリア" || lowerEn is "barrier" or "manaward" or "breach")
+        {
+            return false;
+        }
+
+        // Explicit defense skills / shield prompts across all languages
+        if (lowerEn.Contains("defense") || lowerEn.Contains("defend") || lowerEn.Contains("shield") ||
+            localText.Contains("防御") || localText.Contains("守護") || localText.Contains("シールド") ||
+            localText.Contains("光の盾") || localText.Contains("ダブルガード") || localText.Contains("ジャストガード") ||
+            localText.Contains("おまもりチアー") || localText.Contains("Lustrous Shield") || localText.Contains("Iron Defense"))
+        {
+            return true;
+        }
+
+        // Full quote sentences synchronized by row
+        if (enWords.Length >= 4 && (enText.EndsWith('.') || enText.EndsWith('!') || enText.EndsWith('?') || enText.EndsWith("...")))
+        {
+            return true;
+        }
+
+        // Local Japanese quote check: must have Japanese quote brackets
+        if (localText.Contains('「') && localText.Contains('」'))
+        {
+            return true;
+        }
+
+        // Known boss defense quotes in Japanese
+        if (localText is "我が剣のサビとなれ！" or "命は星を巡る" or "マタ・タビ" or "星の輝きを力に！")
+        {
+            return true;
+        }
+
+        return false;
     }
 
     /// <summary>
-    /// Removes the 4 allowed punctuation marks (!, ?, ', -) while preserving spaces.
+    /// Checks if the given word is a known Cactuar / Sabotender name.
+    /// </summary>
+    public static bool DetermineIsCactuar(string text, uint rowId)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return false;
+        var clean = StripPunctuation(text);
+        if (clean.Contains("サボテンダー", StringComparison.OrdinalIgnoreCase) ||
+            clean.Contains("サボテン", StringComparison.OrdinalIgnoreCase) ||
+            clean.Contains("Cactuar", StringComparison.OrdinalIgnoreCase) ||
+            clean.Contains("Sabotender", StringComparison.OrdinalIgnoreCase) ||
+            clean.Contains("Kaktor", StringComparison.OrdinalIgnoreCase) ||
+            clean.Contains("Pampa", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Removes punctuation marks (!, ?, ', -, and Japanese punctuation ！, ？, 、, 。, 「, 」, ・, ～, 〜) while preserving words.
     /// In French typography, exclamation and question marks are preceded by a space (e.g. "tous !").
-    /// Stripping the punctuation also removes any trailing space before it and trims the result,
-    /// preventing a phantom trailing space from being typed at the end of the sentence.
+    /// Stripping the punctuation also removes any trailing space before it and trims the result.
     /// </summary>
     public static string StripPunctuation(string input)
     {
@@ -192,12 +226,12 @@ public static class KTGWordDatabase
 
             // If a space is immediately followed by a punctuation mark being stripped (common in French: " !"),
             // skip the space as well so it doesn't become a dangling trailing space or double space.
-            if (c == ' ' && i + 1 < input.Length && input[i + 1] is '!' or '?')
+            if (c == ' ' && i + 1 < input.Length && input[i + 1] is '!' or '?' or '！' or '？')
             {
                 continue;
             }
 
-            if (c is not ('!' or '?' or '\'' or '-'))
+            if (c is not ('!' or '?' or '\'' or '-' or '！' or '？' or '、' or '。' or '「' or '」' or '・' or '～' or '〜'))
             {
                 sb.Append(c);
             }
@@ -218,6 +252,13 @@ public static class KTGWordDatabase
             return exact;
         }
 
+        // Normalize wave dash (U+301C) to fullwidth tilde (U+FF5E)
+        var waveNormalized = normalized.Replace('\u301C', '\uFF5E');
+        if (ByExactMatch.TryGetValue(waveNormalized, out var waveMatch))
+        {
+            return waveMatch;
+        }
+
         var stripped = StripPunctuation(normalized);
         if (ByStrippedMatch.TryGetValue(stripped, out var strippedMatch))
         {
@@ -232,14 +273,10 @@ public static class KTGWordDatabase
             return Entries.FirstOrDefault(e => regex.IsMatch(e.Stripped));
         }
 
-        // Substring / suffix fallback for quotes or partial phrases (e.g. "しむことはない、星に帰るだけだ" -> "悲しむことはない、星に帰るだけだ")
-        if (normalized.Length >= 6)
+        // Suffix/prefix match for quotes obscured at head or tail (minimum 8 characters)
+        if (stripped.Length >= 8)
         {
-            var match = Entries.FirstOrDefault(e =>
-                e.Normalized.Contains(normalized) ||
-                normalized.Contains(e.Normalized) ||
-                e.Stripped.Contains(stripped) ||
-                stripped.Contains(e.Stripped));
+            var match = Entries.FirstOrDefault(e => e.IsDefense && (e.Stripped.EndsWith(stripped) || e.Stripped.StartsWith(stripped)));
             if (match != null)
             {
                 return match;

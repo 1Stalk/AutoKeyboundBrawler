@@ -46,11 +46,13 @@ public static class KTGLocalizationRegistry
     // 2. Halt Avoidance Spells (Dynamic Sensory Jammer & Cursed Gaze)
     // ------------------------------------------------------------------------
     public const uint DynamicSensoryJammerActionId = 49702;
+    public const uint DynamicSensoryJammerKeyboundActionId = 49532;
     public const uint CursedGazeActionId = 49529;
 
     public static readonly uint[] HaltActionIds =
     [
         DynamicSensoryJammerActionId,
+        DynamicSensoryJammerKeyboundActionId,
         CursedGazeActionId,
         21396, 17407, 8342, 8341, 7354, 7353, 32448, 512
     ];
@@ -223,13 +225,13 @@ public static class KTGLocalizationRegistry
     public static readonly string[] LocalizedDefenseKeywords =
     [
         // English
-        "defense", "defend", "barrier", "shield", "protect",
+        "defense", "defend", "shield", "protect",
         // German
-        "verteidigung", "schild", "barriere", "schützen",
+        "verteidigung", "schild", "schützen",
         // French
-        "défense", "bouclier", "barrière", "protéger",
+        "défense", "bouclier", "protéger",
         // Japanese
-        "防", "守", "バリア", "シールド"
+        "防御", "守護", "シールド"
     ];
 
     public static bool ContainsDefenseKeyword(string word)
@@ -239,7 +241,46 @@ public static class KTGLocalizationRegistry
     }
 
     // ------------------------------------------------------------------------
-    // 6. Registration Confirmation Button
+    // 6. Boss Ultimate Attacks (Demand Immediate Player Defense Shield)
+    // ------------------------------------------------------------------------
+    public static readonly uint[] BossUltimateActionIds =
+    [
+        49538, // メインカノン / Main Cannon (Cast 12.0s)
+        49699, // バスターキャノン / Tankbuster (Cast 30.0s)
+        49555, // エクリプスメテオ / Ecliptic Meteor (Cast 30.0s)
+        49703, // ビッグボンバー / Big Bomber (Cast 12.0s)
+        49554, // ミールストーム / Charybdis (Cast 12.0s)
+        49677, // ダンスマカブル / Sword Danse Macabre (Cast 12.0s)
+        49749, // ファーストソング / The First Song (Cast 10.0s)
+        49750  // ラストソング / The Last Song (Cast 10.0s)
+    ];
+
+    public static readonly string[] LocalizedBossUltimateSpellRoots =
+    [
+        "メインカノン", "main cannon",
+        "バスターキャノン", "tankbuster",
+        "エクリプスメテオ", "ecliptic meteor",
+        "ビッグボンバー", "big bomber",
+        "ミールストーム", "charybdis",
+        "ダンスマカブル", "danse macabre",
+        "ファーストソング", "the first song",
+        "ラストソング", "the last song"
+    ];
+
+    public static bool IsBossUltimateCast(string? spellName, uint actionId = 0)
+    {
+        if (actionId > 0 && BossUltimateActionIds.Contains(actionId))
+        {
+            return true;
+        }
+
+        if (string.IsNullOrWhiteSpace(spellName)) return false;
+
+        return LocalizedBossUltimateSpellRoots.Any(root => spellName.Contains(root, StringComparison.OrdinalIgnoreCase));
+    }
+
+    // ------------------------------------------------------------------------
+    // 7. Registration Confirmation Button
     // ------------------------------------------------------------------------
     public static readonly string[] LocalizedRegisterButtonTexts =
     [
@@ -256,4 +297,3 @@ public static class KTGLocalizationRegistry
         return LocalizedRegisterButtonTexts.Any(b => text.Contains(b, StringComparison.OrdinalIgnoreCase));
     }
 }
-
