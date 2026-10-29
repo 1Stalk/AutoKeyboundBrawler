@@ -229,7 +229,7 @@ public static unsafe class KTGStateReader
             !(recentSubmitAgeMs < 1200 && IsSameWord(t.Word, recentlySubmittedWord)));
         if (defenseTarget != null) return true;
 
-        var cutoff = DateTime.UtcNow.AddSeconds(-2.0);
+        var cutoff = DateTime.UtcNow.AddSeconds(-0.8);
         var cached = _targetCache.Values
             .FirstOrDefault(c => c.SlotId != 2 && c.LastSeenUtc >= cutoff &&
                 IsDefenseSentence(c.Word, c.SlotId, c.ScreenY) &&

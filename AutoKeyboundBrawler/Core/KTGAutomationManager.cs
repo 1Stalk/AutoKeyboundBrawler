@@ -24,7 +24,6 @@ public class KTGAutomationManager
 
     private DateTime _lastActionTime = DateTime.MinValue;
     private DateTime _lastSubmissionTime = DateTime.MinValue;
-    private DateTime _lastPreemptTime = DateTime.MinValue;
     private DateTime _lastRegistrationTime = DateTime.MinValue;
 
     // Humanized delay tracking: a random delay is pre-rolled per named action
@@ -39,8 +38,6 @@ public class KTGAutomationManager
     private string _lastSubmittedWord = string.Empty;
     private string _lastTargetWord = string.Empty;
     private int _lastTargetSlotId = -1;
-    private bool _isCurrentlyTypingDefense;
-    private bool _isCurrentlyTypingNeedles;
 
     public string CurrentStatus { get; private set; } = "Idle";
     public string ActiveWord => _simulator.IsTyping ? _simulator.CurrentWord : _lastTargetWord;
@@ -173,8 +170,6 @@ public class KTGAutomationManager
             _haltRecoveryState = HaltRecoveryState.SendEnter;
             _lastTargetSlotId = -1;
             _lastTargetWord = string.Empty;
-            _isCurrentlyTypingDefense = false;
-            _isCurrentlyTypingNeedles = false;
             if (_simulator.IsTyping)
             {
                 _log.Warning($"[AutoKeyboundBrawler] Safety stop triggered ({safetyReason}). Halting typing simulator without sending keystrokes.");
@@ -200,8 +195,6 @@ public class KTGAutomationManager
             _lastSubmittedWord = _simulator.LastSubmittedWord;
             _lastSubmissionTime = DateTime.UtcNow;
             _simulator.JustSubmitted = false;
-            _isCurrentlyTypingDefense = false;
-            _isCurrentlyTypingNeedles = false;
 
             // Invalidate submitted word from memory cache immediately
             KTGStateReader.InvalidateSubmittedWord(_lastSubmittedWord);
@@ -216,63 +209,11 @@ public class KTGAutomationManager
             return;
         }
 
-        // 5. Mid-Typing Processing & Preemption
+        // 5. Mid-Typing: Commit to current word - never cancel to switch targets.
+        // Defense & priority is fully resolved BEFORE typing starts (in step 7).
+        // Only KTGSafetyGuard halt (step 1) can abort mid-type.
         if (_simulator.IsTyping)
         {
-            // CRITICAL: We DO NOT cancel typing when words disappear or hide on screen!
-            // In Keybound Brawler, the "Phrases partially obscured!" / confusion debuff periodically hides
-            // on-screen words for several seconds. When words are hidden, the player is expected to finish
-            // typing the word from memory. The simulator smoothly types the word to completion and sends Enter.
-
-            // Preemption checks when typing non-defensive target:
-            // 1) Urgent Defensive Sentence to survive incoming boss ultimate/tankbuster.
-            // 2) Emergency Cactuar Needles cast to eliminate Cactuar immediately.
-            var isTypingDefense = _isCurrentlyTypingDefense;
-            var isTypingNeedles = _isCurrentlyTypingNeedles;
-
-            if ((DateTime.UtcNow - _lastPreemptTime).TotalMilliseconds > 250)
-            {
-                if (!isTypingDefense &&
-                    _config.PrioritizeDefense &&
-                    _config.AbortForDefense &&
-                    KTGStateReader.HasActiveDefenseSentenceOnScreen(out var defenseTarget, _lastSubmittedWord, submitAgeMs) &&
-                    defenseTarget != null &&
-                    defenseTarget.SlotId != 2 &&
-                    !KTGStateReader.IsSameWord(defenseTarget.Word, _simulator.CurrentWord))
-                {
-                    _lastPreemptTime = DateTime.UtcNow;
-                    _log.Information($"[AutoKeyboundBrawler] Urgent defense prompt \"{defenseTarget.Word}\" (Slot {defenseTarget.SlotId}, ScreenY {defenseTarget.ScreenY:F1}) detected! Preempting current target to raise defense immediately.");
-                    _simulator.Clear();
-                    KTGInputSimulator.TryClearInputBuffer();
-                    _lastTargetSlotId = defenseTarget.SlotId;
-                    _lastTargetWord = defenseTarget.Word;
-                    _isCurrentlyTypingDefense = true;
-                    _isCurrentlyTypingNeedles = false;
-                    _simulator.EnqueueWord(defenseTarget.Word, _config);
-                    CurrentStatus = $"[DEFENSE SENTENCE] Enqueued: \"{defenseTarget.Word}\"";
-                    return;
-                }
-
-                if (!isTypingDefense && !isTypingNeedles &&
-                    KTGStateReader.HasActiveNeedlesTargetOnScreen(out var needlesTarget) &&
-                    needlesTarget != null &&
-                    needlesTarget.SlotId != 2 &&
-                    !KTGStateReader.IsSameWord(needlesTarget.Word, _simulator.CurrentWord))
-                {
-                    _lastPreemptTime = DateTime.UtcNow;
-                    _log.Information($"[AutoKeyboundBrawler] Emergency Cactuar Needles prompt \"{needlesTarget.Word}\" (Slot {needlesTarget.SlotId}) detected! Preempting current target to eliminate Cactuar immediately.");
-                    _simulator.Clear();
-                    KTGInputSimulator.TryClearInputBuffer();
-                    _lastTargetSlotId = needlesTarget.SlotId;
-                    _lastTargetWord = needlesTarget.Word;
-                    _isCurrentlyTypingDefense = false;
-                    _isCurrentlyTypingNeedles = true;
-                    _simulator.EnqueueWord(needlesTarget.Word, _config);
-                    CurrentStatus = $"[CACTUAR/NEEDLES] Enqueued: \"{needlesTarget.Word}\"";
-                    return;
-                }
-            }
-
             CurrentStatus = $"Typing: \"{_simulator.CurrentWord}\" ({_simulator.RemainingChars} left)";
             _simulator.Update(_config);
             return;
@@ -300,9 +241,6 @@ public class KTGAutomationManager
                             (KTGStateReader.HasActiveNeedlesTargetOnScreen(out var activeNeedles) && activeNeedles?.SlotId == target.SlotId);
             var isBoss = target.SlotId == 2;
             var tag = isDefense ? "[DEFENSE SENTENCE]" : (isNeedles ? "[CACTUAR/NEEDLES]" : (isBoss ? "[BOSS]" : "[ADD/MOB]"));
-
-            _isCurrentlyTypingDefense = isDefense;
-            _isCurrentlyTypingNeedles = isNeedles;
 
             CurrentStatus = $"{tag} Enqueued: \"{target.Word}\"";
             _log.Information($"[AutoKeyboundBrawler] Target selected {tag} (Slot {target.SlotId}, ScreenY {target.ScreenY:F1}): \"{target.Word}\"");
@@ -588,7 +526,6 @@ public class KTGAutomationManager
     {
         _simulator.Clear();
         _lastTargetSlotId = -1;
-        _lastPreemptTime = DateTime.MinValue;
         _lastRegistrationTime = DateTime.MinValue;
         _wasInHalt = false;
         _haltRecoveryState = HaltRecoveryState.None;
