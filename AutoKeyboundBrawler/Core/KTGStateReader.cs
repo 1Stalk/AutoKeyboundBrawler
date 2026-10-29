@@ -122,7 +122,7 @@ public static unsafe class KTGStateReader
     /// <summary>
     /// Checks if a given target is a true Defensive Sentence / Player Shield Prompt:
     /// - SlotId == 2 is STRICTLY the Boss enemy. The Boss can NEVER be a player defensive prompt.
-    /// - SlotId >= 20000 or screenY >= 700f: Dedicated player defensive prompt in KTGEWord.
+    /// - SlotId >= 20000 or screenY >= 680f: Dedicated player defensive prompt in KTGEWord.
     /// - Checks KTGWordDatabase cross-language defense flag (1:1 row sync with English sheet).
     /// - Localized defense keywords via KTGLocalizationRegistry.
     /// - Japanese sentence punctuation (、, 。, 「, 」) or Japanese quote length.
@@ -138,7 +138,7 @@ public static unsafe class KTGStateReader
         }
 
         // Dedicated player defensive prompt in KTGEWord UI is positioned at the bottom of the screen (ScreenY >= 700)
-        if (screenY >= 700f)
+        if (screenY >= 680f)
         {
             return true;
         }
@@ -195,19 +195,40 @@ public static unsafe class KTGStateReader
     /// Checks if an active defensive prompt is currently visible on screen.
     /// Excludes recently submitted defense words to prevent false preemption while shield animations linger.
     /// </summary>
+    public static bool IsSameWord(string? wordA, string? wordB)
+    {
+        if (string.IsNullOrWhiteSpace(wordA) || string.IsNullOrWhiteSpace(wordB)) return false;
+        if (string.Equals(wordA.Trim(), wordB.Trim(), StringComparison.OrdinalIgnoreCase)) return true;
+
+        var cleanA = KTGWordDatabase.StripPunctuation(wordA).ToLowerInvariant();
+        var cleanB = KTGWordDatabase.StripPunctuation(wordB).ToLowerInvariant();
+        if (string.Equals(cleanA, cleanB, StringComparison.OrdinalIgnoreCase)) return true;
+
+        var matchA = KTGWordDatabase.FindMatch(wordA);
+        var matchB = KTGWordDatabase.FindMatch(wordB);
+        if (matchA != null && matchB != null && matchA.RowId == matchB.RowId) return true;
+
+        return false;
+    }
+
+    /// <summary>
+    /// Checks if an active defensive prompt is currently visible on screen.
+    /// Excludes recently submitted defense words for 4.5 seconds while shield animations play
+    /// to prevent false preemption loops.
+    /// </summary>
     public static bool HasActiveDefenseSentenceOnScreen(out KTGTargetWord? defenseTarget, string? recentlySubmittedWord = null, double recentSubmitAgeMs = 9999)
     {
         var targets = AddonKTGEWord.ReadActiveTargets();
         defenseTarget = targets.FirstOrDefault(t => t.SlotId != 2 &&
             IsDefenseSentence(t.Word, t.SlotId, t.ScreenY) &&
-            !(recentSubmitAgeMs < 1500 && string.Equals(t.Word, recentlySubmittedWord, StringComparison.OrdinalIgnoreCase)));
+            !(recentSubmitAgeMs < 4500 && IsSameWord(t.Word, recentlySubmittedWord)));
         if (defenseTarget != null) return true;
 
         var cutoff = DateTime.UtcNow.AddSeconds(-4.0);
         var cached = _targetCache.Values
             .FirstOrDefault(c => c.SlotId != 2 && c.LastSeenUtc >= cutoff &&
                 IsDefenseSentence(c.Word, c.SlotId, c.ScreenY) &&
-                !(recentSubmitAgeMs < 1500 && string.Equals(c.Word, recentlySubmittedWord, StringComparison.OrdinalIgnoreCase)));
+                !(recentSubmitAgeMs < 4500 && IsSameWord(c.Word, recentlySubmittedWord)));
         if (cached != null)
         {
             defenseTarget = new KTGTargetWord(cached.SlotId, cached.Word, cached.ScreenY, cached.ScreenX);
@@ -369,9 +390,26 @@ public static unsafe class KTGStateReader
         string? recentlySubmittedWord = null,
         double recentSubmitAgeMs = 9999)
     {
+        // 0. ABSOLUTE TOP PRIORITY: Defensive Sentence (Player Shield)
+        // If an active, unsubmitted defense prompt is on screen, IMMEDIATELY select it before anything else!
+        // Never targets boss first when a defense phrase is already on screen.
+        if (config.PrioritizeDefense && HasActiveDefenseSentenceOnScreen(out var defenseTarget, recentlySubmittedWord, recentSubmitAgeMs) && defenseTarget != null)
+        {
+            var match = KTGWordDatabase.FindMatch(defenseTarget.Word);
+            return defenseTarget with { Word = match?.Original ?? defenseTarget.Word };
+        }
+
+        // 1. ABSOLUTE SECOND PRIORITY: Cactuar casting Needles (Emergency Interrupt)
+        // If a Cactuar is actively casting Needles / 針？本, IMMEDIATELY kill it before regular adds and boss!
+        if (HasActiveNeedlesTargetOnScreen(out var needlesTarget) && needlesTarget != null)
+        {
+            var match = KTGWordDatabase.FindMatch(needlesTarget.Word);
+            return needlesTarget with { Word = match?.Original ?? needlesTarget.Word };
+        }
+
         var targets = AddonKTGEWord.ReadActiveTargets();
 
-        // 1. If live targets are visible on screen, update our short-term memory cache
+        // 2. If live targets are visible on screen, update our short-term memory cache
         if (targets.Count > 0)
         {
             var now = DateTime.UtcNow;
@@ -407,16 +445,15 @@ public static unsafe class KTGStateReader
                 }
             }
 
-            // Remove cache entries for slots that are no longer in live targets
-            var liveSlots = new HashSet<int>(targets.Select(t => t.SlotId));
-            var staleSlots = _targetCache.Keys.Where(k => !liveSlots.Contains(k)).ToList();
+            // Only expire cache entries not seen for over 5.0 seconds (prevents cache wiping during confusion debuff)
+            var staleSlots = _targetCache.Where(kvp => (now - kvp.Value.LastSeenUtc).TotalSeconds > 5.0).Select(kvp => kvp.Key).ToList();
             foreach (var s in staleSlots)
             {
                 _targetCache.Remove(s);
             }
         }
 
-        // 2. Determine candidate pool
+        // 3. Determine candidate pool
         List<KTGTargetWord> candidates;
         if (targets.Count > 0)
         {
@@ -445,7 +482,7 @@ public static unsafe class KTGStateReader
         // Filter out recently submitted word (prevents re-targeting same mob within 1.2s)
         if (!string.IsNullOrEmpty(recentlySubmittedWord) && recentSubmitAgeMs < 1200)
         {
-            var filtered = candidates.Where(t => !string.Equals(t.Word, recentlySubmittedWord, StringComparison.OrdinalIgnoreCase)).ToList();
+            var filtered = candidates.Where(t => !IsSameWord(t.Word, recentlySubmittedWord)).ToList();
             if (filtered.Count > 0)
             {
                 candidates = filtered;

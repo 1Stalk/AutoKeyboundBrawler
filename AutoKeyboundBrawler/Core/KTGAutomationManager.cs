@@ -39,6 +39,8 @@ public class KTGAutomationManager
     private string _lastSubmittedWord = string.Empty;
     private string _lastTargetWord = string.Empty;
     private int _lastTargetSlotId = -1;
+    private bool _isCurrentlyTypingDefense;
+    private bool _isCurrentlyTypingNeedles;
 
     public string CurrentStatus { get; private set; } = "Idle";
     public string ActiveWord => _simulator.IsTyping ? _simulator.CurrentWord : _lastTargetWord;
@@ -171,6 +173,8 @@ public class KTGAutomationManager
             _haltRecoveryState = HaltRecoveryState.SendEnter;
             _lastTargetSlotId = -1;
             _lastTargetWord = string.Empty;
+            _isCurrentlyTypingDefense = false;
+            _isCurrentlyTypingNeedles = false;
             if (_simulator.IsTyping)
             {
                 _log.Warning($"[AutoKeyboundBrawler] Safety stop triggered ({safetyReason}). Halting typing simulator without sending keystrokes.");
@@ -196,6 +200,8 @@ public class KTGAutomationManager
             _lastSubmittedWord = _simulator.LastSubmittedWord;
             _lastSubmissionTime = DateTime.UtcNow;
             _simulator.JustSubmitted = false;
+            _isCurrentlyTypingDefense = false;
+            _isCurrentlyTypingNeedles = false;
 
             // Invalidate submitted word from memory cache immediately
             KTGStateReader.InvalidateSubmittedWord(_lastSubmittedWord);
@@ -221,18 +227,18 @@ public class KTGAutomationManager
             // Preemption checks when typing non-defensive target:
             // 1) Urgent Defensive Sentence to survive incoming boss ultimate/tankbuster.
             // 2) Emergency Cactuar Needles cast to eliminate Cactuar immediately.
-            var isCurrentlyDefense = KTGStateReader.IsDefenseSentence(_simulator.CurrentWord, _lastTargetSlotId);
-            var isCurrentlyNeedles = KTGStateReader.IsCactuarWord(_simulator.CurrentWord);
+            var isDefense = _isCurrentlyTypingDefense || KTGStateReader.IsDefenseSentence(_simulator.CurrentWord, _lastTargetSlotId);
+            var isNeedles = _isCurrentlyTypingNeedles || KTGStateReader.IsCactuarWord(_simulator.CurrentWord);
 
             if ((DateTime.UtcNow - _lastPreemptTime).TotalMilliseconds > 400)
             {
-                if (!isCurrentlyDefense &&
+                if (!isDefense &&
                     _config.PrioritizeDefense &&
                     _config.AbortForDefense &&
                     KTGStateReader.HasActiveDefenseSentenceOnScreen(out var defenseTarget, _lastSubmittedWord, submitAgeMs) &&
                     defenseTarget != null &&
                     defenseTarget.SlotId != 2 &&
-                    !string.Equals(defenseTarget.Word, _simulator.CurrentWord, StringComparison.OrdinalIgnoreCase))
+                    !KTGStateReader.IsSameWord(defenseTarget.Word, _simulator.CurrentWord))
                 {
                     _lastPreemptTime = DateTime.UtcNow;
                     _log.Information($"[AutoKeyboundBrawler] Urgent defense prompt \"{defenseTarget.Word}\" (Slot {defenseTarget.SlotId}, ScreenY {defenseTarget.ScreenY:F1}) detected! Preempting current target to raise defense immediately.");
@@ -240,16 +246,18 @@ public class KTGAutomationManager
                     KTGInputSimulator.TryClearInputBuffer();
                     _lastTargetSlotId = defenseTarget.SlotId;
                     _lastTargetWord = defenseTarget.Word;
+                    _isCurrentlyTypingDefense = true;
+                    _isCurrentlyTypingNeedles = false;
                     _simulator.EnqueueWord(defenseTarget.Word, _config);
                     CurrentStatus = $"[DEFENSE SENTENCE] Enqueued: \"{defenseTarget.Word}\"";
                     return;
                 }
 
-                if (!isCurrentlyDefense && !isCurrentlyNeedles &&
+                if (!isDefense && !isNeedles &&
                     KTGStateReader.HasActiveNeedlesTargetOnScreen(out var needlesTarget) &&
                     needlesTarget != null &&
                     needlesTarget.SlotId != 2 &&
-                    !string.Equals(needlesTarget.Word, _simulator.CurrentWord, StringComparison.OrdinalIgnoreCase))
+                    !KTGStateReader.IsSameWord(needlesTarget.Word, _simulator.CurrentWord))
                 {
                     _lastPreemptTime = DateTime.UtcNow;
                     _log.Information($"[AutoKeyboundBrawler] Emergency Cactuar Needles prompt \"{needlesTarget.Word}\" (Slot {needlesTarget.SlotId}) detected! Preempting current target to eliminate Cactuar immediately.");
@@ -257,6 +265,8 @@ public class KTGAutomationManager
                     KTGInputSimulator.TryClearInputBuffer();
                     _lastTargetSlotId = needlesTarget.SlotId;
                     _lastTargetWord = needlesTarget.Word;
+                    _isCurrentlyTypingDefense = false;
+                    _isCurrentlyTypingNeedles = true;
                     _simulator.EnqueueWord(needlesTarget.Word, _config);
                     CurrentStatus = $"[CACTUAR/NEEDLES] Enqueued: \"{needlesTarget.Word}\"";
                     return;
@@ -290,6 +300,9 @@ public class KTGAutomationManager
                             AddonKTGEnemyCastBar.ReadActiveCasts().Any(c => c.SlotId == target.SlotId && AddonKTGEnemyCastBar.IsNeedlesSpell(c.SpellName));
             var isBoss = target.SlotId == 2;
             var tag = isDefense ? "[DEFENSE SENTENCE]" : (isNeedles ? "[CACTUAR/NEEDLES]" : (isBoss ? "[BOSS]" : "[ADD/MOB]"));
+
+            _isCurrentlyTypingDefense = isDefense;
+            _isCurrentlyTypingNeedles = isNeedles;
 
             CurrentStatus = $"{tag} Enqueued: \"{target.Word}\"";
             _log.Information($"[AutoKeyboundBrawler] Target selected {tag} (Slot {target.SlotId}, ScreenY {target.ScreenY:F1}): \"{target.Word}\"");

@@ -119,10 +119,11 @@ public static class KTGWordDatabase
                     isDefense = KTGLocalizationRegistry.ContainsDefenseKeyword(text);
                 }
 
-                // Additional checks for defense: Japanese quotes and punctuation
-                if (!isDefense)
+                // Additional checks for defense: Japanese quotes, punctuation, or long quote structure
+                if (!isDefense && !isCactuar)
                 {
                     if (text.Contains('、') || text.Contains('。') || text.Contains('「') || text.Contains('」') ||
+                        (targetLang == ClientLanguage.Japanese && text.Length >= 10) ||
                         KTGLocalizationRegistry.ContainsDefenseKeyword(text))
                     {
                         isDefense = true;
