@@ -164,32 +164,32 @@ public class MainWindow : Window, IDisposable
 
             // 2. Main Toggles
             var minigame = _config.MinigameAutoplay;
-            if (FF7ToggleSwitch.DrawRow("##minigame_solver", "Typing Solver", "Humanized typing, shield detection & adds priority", ref minigame,
-                FF7RTheme.MakoCyan, "Automatically solves enemy phrases letter-by-letter with humanized typing delays."))
+            if (FF7ToggleSwitch.DrawRow("##minigame_solver", Loc.Get("TypingSolver"), Loc.Get("TypingSolverSub"), ref minigame,
+                FF7RTheme.MakoCyan, Loc.Get("TypingSolverTip")))
             {
                 _config.SetMinigameAutoplay(minigame);
             }
 
             var autoLoop = _config.AutoLoopEnabled;
-            if (FF7ToggleSwitch.DrawRow("##afk_loop", "AFK Loop", "Auto-register, commence & exit results", ref autoLoop,
-                FF7RTheme.AtbGold, "Automatically interacts with Registrar, confirms entry, commences duty, and exits results."))
+            if (FF7ToggleSwitch.DrawRow("##afk_loop", Loc.Get("AfkLoop"), Loc.Get("AfkLoopSub"), ref autoLoop,
+                FF7RTheme.AtbGold, Loc.Get("AfkLoopTip")))
             {
                 _config.SetAutoLoop(autoLoop);
             }
 
             var autoOpen = _config.AutoOpenNearRegistrar;
-            if (FF7ToggleSwitch.DrawRow("##auto_open_reg", "Auto-Open Near Registrar", "Open UI automatically in interaction range", ref autoOpen,
-                FF7RTheme.MakoCyan, "Automatically opens this interface whenever you approach the Keybound Registrar NPC."))
+            if (FF7ToggleSwitch.DrawRow("##auto_open_reg", Loc.Get("AutoOpenReg"), Loc.Get("AutoOpenRegSub"), ref autoOpen,
+                FF7RTheme.MakoCyan, Loc.Get("AutoOpenRegTip")))
             {
                 _config.AutoOpenNearRegistrar = autoOpen;
                 _config.Save();
             }
 
             // 3. Section: SPEED
-            DrawSectionLabel(dl, "SPEED", contentWidth, scale);
+            DrawSectionLabel(dl, Loc.Get("Speed"), contentWidth, scale);
 
             var minDelay = _config.CharDelayMinMs;
-            if (TacticalSlider.Draw("char_min", "Min Keystroke Delay", ref minDelay, 10, 150))
+            if (TacticalSlider.Draw("char_min", Loc.Get("MinCharDelay"), ref minDelay, 10, 150))
             {
                 _config.CharDelayMinMs = minDelay;
                 if (_config.CharDelayMaxMs < minDelay) _config.CharDelayMaxMs = minDelay;
@@ -197,22 +197,22 @@ public class MainWindow : Window, IDisposable
             }
 
             var maxDelay = _config.CharDelayMaxMs;
-            if (TacticalSlider.Draw("char_max", "Max Keystroke Delay", ref maxDelay, 15, 250))
+            if (TacticalSlider.Draw("char_max", Loc.Get("MaxCharDelay"), ref maxDelay, 15, 250))
             {
                 _config.CharDelayMaxMs = Math.Max(_config.CharDelayMinMs, maxDelay);
                 _config.Save();
             }
 
             var enterDelay = _config.SubmissionDelayMs;
-            if (TacticalSlider.Draw("sub_delay", "Submit Delay", ref enterDelay, 20, 300))
+            if (TacticalSlider.Draw("sub_delay", Loc.Get("SubDelay"), ref enterDelay, 20, 300))
             {
                 _config.SubmissionDelayMs = enterDelay;
                 _config.Save();
             }
 
             var ignorePunct = _config.IgnorePunctuation;
-            if (FF7ToggleSwitch.DrawRow("##ignore_punct", "Ignore Punctuation", "Auto-strip !, ?, ', - from phrases", ref ignorePunct,
-                FF7RTheme.MakoCyan, "Automatically strips punctuation symbols to guarantee faster, error-free typing."))
+            if (FF7ToggleSwitch.DrawRow("##ignore_punct", Loc.Get("IgnorePunct"), Loc.Get("IgnorePunctSub"), ref ignorePunct,
+                FF7RTheme.MakoCyan, Loc.Get("IgnorePunctTip")))
             {
                 _config.IgnorePunctuation = ignorePunct;
                 _config.Save();
@@ -251,7 +251,7 @@ public class MainWindow : Window, IDisposable
         // Active word
         var activeWord = _automation.ActiveWord;
         var hasWord = !string.IsNullOrEmpty(activeWord);
-        var displayWord = hasWord ? $"> \"{activeWord}\" <" : "> standby <";
+        var displayWord = hasWord ? $"> \"{activeWord}\" <" : Loc.Get("Standby");
         var wordColor = isHalt ? FF7RTheme.LimitRedSoft :
                         isTyping ? FF7RTheme.MakoCyanSoft :
                         hasWord ? FF7RTheme.TextStrong :
@@ -261,10 +261,10 @@ public class MainWindow : Window, IDisposable
         dl.AddText(wordPos, Paint.Col(wordColor), displayWord);
 
         // Right-aligned mini status text
-        var statusLabel = isHalt ? "HALT" :
-                          isTyping ? "TYPING" :
-                          isDuty ? "COMBAT" :
-                          "IDLE";
+        var statusLabel = isHalt ? Loc.Get("BadgeHalt") :
+                          isTyping ? Loc.Get("BadgeTyping") :
+                          isDuty ? Loc.Get("BadgeCombat") :
+                          Loc.Get("BadgeIdle");
         var statusSize = ImGui.CalcTextSize(statusLabel);
         var statusPos = new Vector2(origin.X + contentWidth - statusSize.X, origin.Y + (barH - statusSize.Y) * 0.5f);
         dl.AddText(statusPos, Paint.Col(FF7RTheme.WithAlpha(dotColor, 0.7f)), statusLabel);

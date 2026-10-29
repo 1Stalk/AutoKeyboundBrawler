@@ -2,6 +2,7 @@ using AutoKeyboundBrawler.Core;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Interface;
 using Dalamud.Interface.Utility;
+using Dalamud.Interface.Utility.Raii;
 using System;
 using System.Numerics;
 
@@ -19,7 +20,7 @@ internal static class HeaderBar
     public static bool HandleDrag(Vector2 windowPos, float width, float height)
     {
         var scale = ImGuiHelpers.GlobalScale;
-        var buttonsW = (ButtonSize * 2f + ButtonGap) * scale;
+        var buttonsW = (ButtonSize * 3f + ButtonGap * 2f) * scale;
         var dragWidth = width - PadX * scale - buttonsW - 6f * scale;
 
         ImGui.SetCursorScreenPos(windowPos);
@@ -86,10 +87,10 @@ internal static class HeaderBar
         textLeft = dotCenter.X + dotRadius + 6f * scale;
 
         // Status pill
-        var rightButtonsLeft = end.X - padX - (ButtonSize * 2f + ButtonGap) * scale;
+        var rightButtonsLeft = end.X - padX - (ButtonSize * 3f + ButtonGap * 2f) * scale;
         DrawStatusPill(dl, automation, textLeft, rightButtonsLeft, midY, compact);
 
-        // Window buttons (Compact & Close)
+        // Window buttons (Compact, Language & Close)
         DrawButtons(window, end, midY, compact);
     }
 
@@ -102,11 +103,11 @@ internal static class HeaderBar
         var isDuty = automation.CurrentPhase == EventPhase.InMinigame || status.Contains("In Combat");
         var isQueue = automation.CurrentPhase is EventPhase.InQueue or EventPhase.Commencing or EventPhase.Registering || status.Contains("Queued") || status.Contains("Commencing") || status.Contains("Registration");
 
-        var badgeText = isHalt ? "HALTED" :
-                        isTyping ? "TYPING" :
-                        isDuty ? "COMBAT" :
-                        isQueue ? "LOOP" :
-                        "IDLE";
+        var badgeText = isHalt ? Loc.Get("BadgeHalt") :
+                        isTyping ? Loc.Get("BadgeTyping") :
+                        isDuty ? Loc.Get("BadgeCombat") :
+                        isQueue ? Loc.Get("BadgeLoop") :
+                        Loc.Get("BadgeIdle");
 
         var badgeColor = isHalt ? FF7RTheme.LimitRed :
                          isTyping ? FF7RTheme.MakoCyan :
@@ -158,7 +159,7 @@ internal static class HeaderBar
 
         // Close button (X)
         ImGui.SetCursorScreenPos(new Vector2(end.X - padX - buttonSize, top));
-        if (IconButton.Draw(FontAwesomeIcon.Times, "##akb_close", buttonSize, tooltip: "Close"))
+        if (IconButton.Draw(FontAwesomeIcon.Times, "##akb_close", buttonSize, tooltip: Loc.Get("Close")))
         {
             window.IsOpen = false;
         }
@@ -166,10 +167,63 @@ internal static class HeaderBar
         // Compact toggle button (Chevron)
         ImGui.SetCursorScreenPos(new Vector2(end.X - padX - buttonSize - stride, top));
         var icon = compact ? FontAwesomeIcon.ChevronDown : FontAwesomeIcon.ChevronUp;
-        if (IconButton.Draw(icon, "##akb_minimize", buttonSize, tooltip: compact ? "Expand" : "Compact"))
+        if (IconButton.Draw(icon, "##akb_minimize", buttonSize, tooltip: compact ? Loc.Get("Expand") : Loc.Get("Compact")))
         {
             window.ToggleCompact();
         }
+
+        // Language selector button (Globe)
+        ImGui.SetCursorScreenPos(new Vector2(end.X - padX - buttonSize - stride * 2f, top));
+        var currentLangCode = Loc.GetLanguageShortName(Loc.CurrentLanguage);
+        var langTooltip = $"{Loc.Get("LangTooltip")} [{currentLangCode}]";
+        if (IconButton.Draw(FontAwesomeIcon.Globe, "##akb_lang", buttonSize, tooltip: langTooltip))
+        {
+            ImGui.OpenPopup("##akb_lang_popup");
+        }
+
+        DrawLanguagePopup();
+    }
+
+    private static void DrawLanguagePopup()
+    {
+        var config = Plugin.Configuration;
+        using var popup = ImRaii.Popup("##akb_lang_popup");
+        if (!popup) return;
+
+        var selected = config.SelectedLanguage;
+        var gameLang = ECommons.DalamudServices.Svc.ClientState.ClientLanguage;
+        var autoLabel = $"{Loc.Get("LangAuto")} [{Loc.GetLanguageShortName(gameLang)}]";
+
+        if (ImGui.Selectable(autoLabel, !selected.HasValue))
+        {
+            config.SelectedLanguage = null;
+            config.Save();
+        }
+
+        ImGui.Separator();
+
+        if (ImGui.Selectable("English (EN)", selected == Dalamud.Game.ClientLanguage.English))
+        {
+            config.SelectedLanguage = Dalamud.Game.ClientLanguage.English;
+            config.Save();
+        }
+
+        if (ImGui.Selectable("日本語 (JA)", selected == Dalamud.Game.ClientLanguage.Japanese))
+        {
+            config.SelectedLanguage = Dalamud.Game.ClientLanguage.Japanese;
+            config.Save();
+        }
+
+        if (ImGui.Selectable("Deutsch (DE)", selected == Dalamud.Game.ClientLanguage.German))
+        {
+            config.SelectedLanguage = Dalamud.Game.ClientLanguage.German;
+            config.Save();
+        }
+
+        if (ImGui.Selectable("Français (FR)", selected == Dalamud.Game.ClientLanguage.French))
+        {
+            config.SelectedLanguage = Dalamud.Game.ClientLanguage.French;
+            config.Save();
+        }
     }
 }
-
