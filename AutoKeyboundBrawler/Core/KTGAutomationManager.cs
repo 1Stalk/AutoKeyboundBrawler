@@ -237,8 +237,8 @@ public class KTGAutomationManager
             _lastTargetWord = target.Word;
 
             var isDefense = KTGStateReader.IsDefenseSentence(target.Word, target.SlotId, target.ScreenY);
-            var isNeedles = KTGStateReader.IsCactuarWord(target.Word) ||
-                            (KTGStateReader.HasActiveNeedlesTargetOnScreen(out var activeNeedles) && activeNeedles?.SlotId == target.SlotId);
+            var isNeedles = target.SlotId != 2 && (KTGStateReader.IsCactuarWord(target.Word) ||
+                            (KTGStateReader.HasActiveNeedlesTargetOnScreen(out var activeNeedles) && activeNeedles?.SlotId == target.SlotId));
             var isBoss = target.SlotId == 2;
             var tag = isDefense ? "[DEFENSE SENTENCE]" : (isNeedles ? "[CACTUAR/NEEDLES]" : (isBoss ? "[BOSS]" : "[ADD/MOB]"));
 

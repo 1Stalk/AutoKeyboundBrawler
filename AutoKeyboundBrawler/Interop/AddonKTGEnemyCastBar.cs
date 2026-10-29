@@ -12,7 +12,8 @@ public record KTGActiveCast(int SlotId, string SpellName);
 
 public static unsafe class AddonKTGEnemyCastBar
 {
-    public const string CastBarAddonName = "KTGEnemyCastBar";
+    public const string CastBarAddonName = "CastBarEnemy";
+    public const string LegacyCastBarAddonName = "KTGEnemyCastBar";
     public const string ScreenTextAddonName = "_ScreenText";
     public const string HudLogAddonName = "KTGHudLog";
 
@@ -46,7 +47,8 @@ public static unsafe class AddonKTGEnemyCastBar
 
     public static bool TryGetCastBar(out AtkUnitBase* addon)
     {
-        return GenericHelpers.TryGetAddonByName(CastBarAddonName, out addon) &&
+        return (GenericHelpers.TryGetAddonByName(CastBarAddonName, out addon) ||
+                GenericHelpers.TryGetAddonByName(LegacyCastBarAddonName, out addon)) &&
                addon != null &&
                addon->IsVisible;
     }
@@ -90,15 +92,23 @@ public static unsafe class AddonKTGEnemyCastBar
                     var child = comp->Component->UldManager.NodeList[j];
                     if (child == null || child->Type != NodeType.Text || !GUINodeUtils.IsNodeActuallyVisible(child, node)) continue;
 
-                    // Node 5 is the numerical cast timer (e.g. "3.5s" or "0"), Node 3 is "Interrupted!"
-                    if (child->NodeId == 5 || child->NodeId == 3) continue;
+                    // Node 5 is the numerical cast timer (e.g. "3.5s" or "0"), Node 2/3 is "Interrupted!"
+                    if (child->NodeId == 5 || child->NodeId == 3 || child->NodeId == 2) continue;
 
                     var text = GUINodeUtils.GetNodeText(child);
                     if (!string.IsNullOrWhiteSpace(text))
                     {
                         text = text.Trim();
-                        if (string.Equals(text, "Interrupted!", StringComparison.OrdinalIgnoreCase)) continue;
-                        if (text.Length > 2 && text.Any(char.IsLetter))
+                        if (string.Equals(text, "Interrupted!", StringComparison.OrdinalIgnoreCase) ||
+                            string.Equals(text, "中断！", StringComparison.OrdinalIgnoreCase) ||
+                            string.Equals(text, "Unterbrochen!", StringComparison.OrdinalIgnoreCase) ||
+                            string.Equals(text, "Interrompu !", StringComparison.OrdinalIgnoreCase) ||
+                            string.Equals(text, "Casting", StringComparison.OrdinalIgnoreCase))
+                        {
+                            continue;
+                        }
+
+                        if (text.Length >= 2 && text.Any(char.IsLetter))
                         {
                             casts.Add(new KTGActiveCast((int)node->NodeId, text));
                         }
@@ -130,9 +140,9 @@ public static unsafe class AddonKTGEnemyCastBar
         spellName = "針？本";
         uiSlotId = -1;
 
-        // 1. Check UI castbar
+        // 1. Check UI castbar (CastBarEnemy) - prioritize non-boss slots
         var casts = ReadActiveCasts();
-        var uiCast = casts.FirstOrDefault(c => IsNeedlesSpell(c.SpellName));
+        var uiCast = casts.FirstOrDefault(c => c.SlotId != 2 && IsNeedlesSpell(c.SpellName));
         if (uiCast != null)
         {
             uiSlotId = uiCast.SlotId;

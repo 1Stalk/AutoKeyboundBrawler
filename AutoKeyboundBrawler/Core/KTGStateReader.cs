@@ -229,13 +229,23 @@ public static unsafe class KTGStateReader
     public static bool HasActiveNeedlesTargetOnScreen(out KTGTargetWord? needlesTarget)
     {
         var targets = AddonKTGEWord.ReadActiveTargets();
-        var nonBossTargets = targets.Where(t => t.SlotId != 2).ToList();
+        // Strictly filter to non-boss and non-defense targets: a defense prompt is never a Cactuar
+        var nonBossTargets = targets.Where(t => t.SlotId != 2 && !IsDefenseSentence(t.Word, t.SlotId, t.ScreenY)).ToList();
 
-        // 1. Check if Needles is being cast via Svc.Objects or UI castbar
+        // 1. Direct slot match from CastBarEnemy (fastest and most accurate: slot IDs match 1-to-1)
+        var casts = AddonKTGEnemyCastBar.ReadActiveCasts();
+        var needleCast = casts.FirstOrDefault(c => c.SlotId != 2 && AddonKTGEnemyCastBar.IsNeedlesSpell(c.SpellName));
+        if (needleCast != null)
+        {
+            needlesTarget = nonBossTargets.FirstOrDefault(t => t.SlotId == needleCast.SlotId);
+            if (needlesTarget != null) return true;
+        }
+
+        // 2. Check if Needles is being cast via Svc.Objects or UI castbar
         if (AddonKTGEnemyCastBar.TryGetNeedlesCastingChara(out var castingChara, out var spellName, out var uiSlotId))
         {
-            // A. Direct UI slot match if available from KTGEnemyCastBar
-            if (uiSlotId > 0)
+            // A. Direct UI slot match if available from CastBarEnemy
+            if (uiSlotId > 0 && uiSlotId != 2)
             {
                 needlesTarget = nonBossTargets.FirstOrDefault(t => t.SlotId == uiSlotId);
                 if (needlesTarget != null) return true;
@@ -287,18 +297,17 @@ public static unsafe class KTGStateReader
             }
         }
 
-        // 2. Direct slot match from castbar
-        var casts = AddonKTGEnemyCastBar.ReadActiveCasts();
+        // 3. Direct slot match from any needle slot in castbar
         var needleSlots = casts
-            .Where(c => AddonKTGEnemyCastBar.IsNeedlesSpell(c.SpellName))
+            .Where(c => c.SlotId != 2 && AddonKTGEnemyCastBar.IsNeedlesSpell(c.SpellName))
             .Select(c => c.SlotId)
             .ToHashSet();
 
         needlesTarget = nonBossTargets.FirstOrDefault(t => needleSlots.Contains(t.SlotId));
         if (needlesTarget != null) return true;
 
-        // 3. Target whose word matches Cactuar and is actively casting any spell
-        var castingSlots = casts.Select(c => c.SlotId).ToHashSet();
+        // 4. Target whose word matches Cactuar and is actively casting any spell
+        var castingSlots = casts.Where(c => c.SlotId != 2).Select(c => c.SlotId).ToHashSet();
         needlesTarget = nonBossTargets.FirstOrDefault(t => castingSlots.Contains(t.SlotId) && IsCactuarWord(t.Word));
         if (needlesTarget != null) return true;
 
@@ -415,8 +424,22 @@ public static unsafe class KTGStateReader
         if (HasActiveNeedlesTargetOnScreen(out var needlesTarget) && needlesTarget != null)
         {
             needlesTargetSlotId = needlesTarget.SlotId;
-            var match = KTGWordDatabase.FindMatch(needlesTarget.Word);
-            return needlesTarget with { Word = match?.Original ?? needlesTarget.Word };
+
+            // If this exact word was just submitted within 1200ms, the game is still resolving the hit
+            // and has not yet displayed the Cactuar's next prompt word. Wait for the new word to appear!
+            var isStaleSubmittedWord = !string.IsNullOrEmpty(recentlySubmittedWord) &&
+                                       recentSubmitAgeMs < 1200 &&
+                                       IsSameWord(needlesTarget.Word, recentlySubmittedWord);
+
+            if (!isStaleSubmittedWord)
+            {
+                var match = KTGWordDatabase.FindMatch(needlesTarget.Word);
+                return needlesTarget with { Word = match?.Original ?? needlesTarget.Word };
+            }
+
+            // Cactuar is actively casting Needles and we are waiting for its next word to appear.
+            // Do NOT fall through to the Boss or regular adds, which would lock typing for 2-3 seconds and wipe!
+            return null;
         }
 
         var targets = AddonKTGEWord.ReadActiveTargets();
