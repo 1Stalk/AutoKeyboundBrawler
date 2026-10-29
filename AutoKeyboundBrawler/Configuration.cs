@@ -30,6 +30,10 @@ public class Configuration : IPluginConfiguration
     public bool AutoCommenceDuty { get; set; } = true;
     public bool AutoLeaveResults { get; set; } = true;
 
+    // Humanized AFK Loop Delays (ms) — randomized delays between loop actions
+    public int LoopDelayMinMs { get; set; } = 1200;
+    public int LoopDelayMaxMs { get; set; } = 3500;
+
     // Typing parameters (Simulated human typing)
     public bool SimulateHumanTyping { get; set; } = true;
     public int CharDelayMinMs { get; set; } = 35;

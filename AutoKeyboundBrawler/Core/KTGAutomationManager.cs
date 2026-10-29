@@ -20,11 +20,17 @@ public class KTGAutomationManager
     private readonly Configuration _config;
     private readonly IPluginLog _log;
     private readonly KTGInputSimulator _simulator = new();
+    private readonly Random _rng = new();
 
     private DateTime _lastActionTime = DateTime.MinValue;
     private DateTime _lastSubmissionTime = DateTime.MinValue;
     private DateTime _lastPreemptTime = DateTime.MinValue;
     private DateTime _lastRegistrationTime = DateTime.MinValue;
+
+    // Humanized delay tracking: a random delay is pre-rolled per named action
+    // and reused until the action fires, then re-rolled for the next attempt.
+    private int _rolledDelayMs;
+    private string _rolledDelayKey = string.Empty;
 
     private bool _wasInHalt;
     private HaltRecoveryState _haltRecoveryState = HaltRecoveryState.None;
@@ -105,6 +111,48 @@ public class KTGAutomationManager
                 break;
         }
     }
+
+    // ── Humanized Delay Helpers ─────────────────────────────────────────
+    // Each loop action gets a pre-rolled random delay. The delay is generated
+    // once per action key and reused until consumed (action fires), then
+    // a fresh delay is rolled for the next attempt. This prevents the jitter
+    // that would occur if we re-rolled every frame.
+
+    /// <summary>
+    /// Returns a pre-rolled random delay (ms) for the named action.
+    /// The delay is scaled from config LoopDelayMinMs / LoopDelayMaxMs by the given factors.
+    /// </summary>
+    private int GetHumanizedDelay(string action, float minFactor = 1f, float maxFactor = 1f)
+    {
+        if (_rolledDelayKey != action)
+        {
+            var baseMin = Math.Max(200, (int)(_config.LoopDelayMinMs * minFactor));
+            var baseMax = Math.Max(baseMin + 100, (int)(_config.LoopDelayMaxMs * maxFactor));
+            _rolledDelayMs = _rng.Next(baseMin, baseMax + 1);
+            _rolledDelayKey = action;
+        }
+        return _rolledDelayMs;
+    }
+
+    /// <summary>
+    /// Returns true when enough time has passed since <paramref name="since"/>
+    /// for the named humanized action delay.
+    /// </summary>
+    private bool IsHumanizedReady(string action, DateTime since, float minFactor = 1f, float maxFactor = 1f)
+    {
+        var delay = GetHumanizedDelay(action, minFactor, maxFactor);
+        return (DateTime.UtcNow - since).TotalMilliseconds > delay;
+    }
+
+    /// <summary>
+    /// Clears the pre-rolled delay so the next action gets a fresh random value.
+    /// </summary>
+    private void ConsumeHumanizedDelay()
+    {
+        _rolledDelayKey = string.Empty;
+    }
+
+    // ── Phase Handlers ──────────────────────────────────────────────────
 
     private void HandleMinigamePhase()
     {
@@ -320,12 +368,13 @@ public class KTGAutomationManager
         AddonKTGEnemyCastBar.Reset();
         KTGStateReader.ClearCache();
 
-        if ((_config.AutoLeaveResults || _config.AutoLoopEnabled) && (DateTime.UtcNow - _lastActionTime).TotalMilliseconds > 1000)
+        if ((_config.AutoLeaveResults || _config.AutoLoopEnabled) && IsHumanizedReady("results", _lastActionTime, 1.5f, 2.0f))
         {
-            _log.Information("[AutoKeyboundBrawler] Auto-closing results screen...");
+            _log.Information($"[AutoKeyboundBrawler] Auto-closing results screen (waited {_rolledDelayMs}ms)...");
             if (AddonKTGResult.CloseResults())
             {
                 _lastActionTime = DateTime.UtcNow;
+                ConsumeHumanizedDelay();
             }
         }
     }
@@ -338,12 +387,13 @@ public class KTGAutomationManager
         _haltRecoveryState = HaltRecoveryState.None;
         KTGStateReader.ClearCache();
 
-        if ((_config.AutoConfirmRegister || _config.AutoCommenceDuty || _config.AutoLoopEnabled) && (DateTime.UtcNow - _lastActionTime).TotalMilliseconds > 500)
+        if ((_config.AutoConfirmRegister || _config.AutoCommenceDuty || _config.AutoLoopEnabled) && IsHumanizedReady("commence", _lastActionTime, 0.8f, 1.2f))
         {
-            _log.Information("[AutoKeyboundBrawler] Duty popped! Auto-commencing...");
+            _log.Information($"[AutoKeyboundBrawler] Duty popped! Auto-commencing (waited {_rolledDelayMs}ms)...");
             if (AddonContentsFinderConfirm.CommenceDuty())
             {
                 _lastActionTime = DateTime.UtcNow;
+                ConsumeHumanizedDelay();
             }
         }
     }
@@ -378,13 +428,14 @@ public class KTGAutomationManager
         _haltRecoveryState = HaltRecoveryState.None;
         KTGStateReader.ClearCache();
 
-        if ((_config.AutoConfirmRegister || _config.AutoLoopEnabled) && (DateTime.UtcNow - _lastActionTime).TotalMilliseconds > 600)
+        if ((_config.AutoConfirmRegister || _config.AutoLoopEnabled) && IsHumanizedReady("register", _lastActionTime, 0.5f, 0.9f))
         {
-            _log.Information("[AutoKeyboundBrawler] Auto-confirming registration (pressing Register)...");
+            _log.Information($"[AutoKeyboundBrawler] Auto-confirming registration (waited {_rolledDelayMs}ms)...");
             if (AddonKTGEnterDialogue.ConfirmRegistration())
             {
                 _lastActionTime = DateTime.UtcNow;
                 _lastRegistrationTime = DateTime.UtcNow;
+                ConsumeHumanizedDelay();
             }
         }
     }
@@ -403,8 +454,10 @@ public class KTGAutomationManager
             return;
         }
 
-        // 2. Cooldown debounce after registering (gives server time to acknowledge queue)
-        if ((DateTime.UtcNow - _lastRegistrationTime).TotalSeconds < 8.0)
+        // 2. Humanized cooldown after registering (gives server time to acknowledge queue,
+        //    with natural variance so re-registration doesn't look robotic)
+        var postRegDelay = GetHumanizedDelay("postReg", 1.8f, 3.5f);
+        if ((DateTime.UtcNow - _lastRegistrationTime).TotalMilliseconds < postRegDelay)
         {
             CurrentStatus = "In Keybound Square (Waiting for queue confirmation...)";
             return;
@@ -412,7 +465,7 @@ public class KTGAutomationManager
 
         CurrentStatus = "In Keybound Square";
 
-        // 3. Advance NPC talk dialog if open
+        // 3. Advance NPC talk dialog if open (with humanized read delay)
         unsafe
         {
             if (ECommons.GenericHelpers.TryGetAddonByName("Talk", out FFXIVClientStructs.FFXIV.Component.GUI.AtkUnitBase* talk) &&
@@ -420,7 +473,12 @@ public class KTGAutomationManager
                 talk->IsVisible &&
                 talk->IsReady)
             {
-                ECommons.Automation.Callback.Fire(talk, true, 0);
+                if (IsHumanizedReady("talk", _lastActionTime, 0.3f, 0.6f))
+                {
+                    ECommons.Automation.Callback.Fire(talk, true, 0);
+                    _lastActionTime = DateTime.UtcNow;
+                    ConsumeHumanizedDelay();
+                }
                 return;
             }
         }
@@ -430,8 +488,8 @@ public class KTGAutomationManager
             return;
         }
 
-        // Throttle NPC interaction
-        if ((DateTime.UtcNow - _lastActionTime).TotalMilliseconds < 1500)
+        // Humanized throttle for NPC interaction
+        if (!IsHumanizedReady("npcInteract", _lastActionTime, 1.0f, 1.5f))
         {
             return;
         }
@@ -499,8 +557,9 @@ public class KTGAutomationManager
         }
 
         CurrentStatus = "In Keybound Square (Interacting with Registrar...)";
-        _log.Information("[AutoKeyboundBrawler] Auto-interacted with Keybound Registrar.");
+        _log.Information($"[AutoKeyboundBrawler] Auto-interacted with Keybound Registrar (waited {_rolledDelayMs}ms).");
         _lastActionTime = DateTime.UtcNow;
+        ConsumeHumanizedDelay();
     }
 
     public void Reset()
@@ -512,6 +571,7 @@ public class KTGAutomationManager
         _wasInHalt = false;
         _haltRecoveryState = HaltRecoveryState.None;
         _lastHaltRecoveryTime = DateTime.MinValue;
+        ConsumeHumanizedDelay();
         AddonKTGEnemyCastBar.Reset();
         KTGStateReader.ClearCache();
         CurrentStatus = "Reset";
