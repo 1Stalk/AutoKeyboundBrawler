@@ -1,6 +1,5 @@
 using AutoKeyboundBrawler.Core;
 using Dalamud.Bindings.ImGui;
-using Dalamud.Interface;
 using Dalamud.Interface.Utility;
 using Dalamud.Interface.Utility.Raii;
 using System;
@@ -13,14 +12,15 @@ internal static class HeaderBar
     private const string Title = "AKB";
     private const float PadX = 8f;
     private const float ButtonSize = 18f;
-    private const float ButtonGap = 3f;
+    private const float LangButtonW = 24f;
+    private const float ButtonGap = 4f;
 
     public const float Height = 28f;
 
     public static bool HandleDrag(Vector2 windowPos, float width, float height)
     {
         var scale = ImGuiHelpers.GlobalScale;
-        var buttonsW = (ButtonSize * 3f + ButtonGap * 2f) * scale;
+        var buttonsW = (ButtonSize * 2f + LangButtonW + ButtonGap * 2f) * scale;
         var dragWidth = width - PadX * scale - buttonsW - 6f * scale;
 
         ImGui.SetCursorScreenPos(windowPos);
@@ -87,7 +87,7 @@ internal static class HeaderBar
         textLeft = dotCenter.X + dotRadius + 6f * scale;
 
         // Status pill
-        var rightButtonsLeft = end.X - padX - (ButtonSize * 3f + ButtonGap * 2f) * scale;
+        var rightButtonsLeft = end.X - padX - (ButtonSize * 2f + LangButtonW + ButtonGap * 2f) * scale;
         DrawStatusPill(dl, automation, textLeft, rightButtonsLeft, midY, compact);
 
         // Window buttons (Compact, Language & Close)
@@ -154,29 +154,140 @@ internal static class HeaderBar
         var scale = ImGuiHelpers.GlobalScale;
         var padX = PadX * scale;
         var buttonSize = ButtonSize * scale;
-        var stride = buttonSize + ButtonGap * scale;
+        var langW = LangButtonW * scale;
+        var gap = ButtonGap * scale;
         var top = midY - buttonSize * 0.5f;
 
-        // Close button (X)
-        ImGui.SetCursorScreenPos(new Vector2(end.X - padX - buttonSize, top));
-        if (IconButton.Draw(FontAwesomeIcon.Times, "##akb_close", buttonSize, tooltip: Loc.Get("Close")))
+        // 1. Close button (rightmost)
+        var closeX = end.X - padX - buttonSize;
+        DrawCloseButton(window, new Vector2(closeX, top), buttonSize, scale);
+
+        // 2. Compact toggle button (middle)
+        var compactX = closeX - gap - buttonSize;
+        DrawCompactButton(window, new Vector2(compactX, top), buttonSize, scale, compact);
+
+        // 3. Language selector button (leftmost of the group)
+        var langX = compactX - gap - langW;
+        DrawLanguageButton(new Vector2(langX, top), langW, buttonSize, scale);
+    }
+
+    private static void DrawCloseButton(MainWindow window, Vector2 origin, float size, float scale)
+    {
+        ImGui.SetCursorScreenPos(origin);
+        var box = new Vector2(size, size);
+        var hit = Hit.Area("##akb_close", box);
+        var hover = Motion.Hover(Motion.Key("##akb_close"), hit.Hovered);
+        var dl = ImGui.GetWindowDrawList();
+        var center = origin + box * 0.5f;
+
+        // Hover background
+        if (hover > 0.01f)
+        {
+            var alpha = hover * (hit.Held ? 0.45f : 0.25f);
+            dl.AddRectFilled(origin, origin + box, Paint.Col(FF7RTheme.WithAlpha(FF7RTheme.LimitRed, alpha)), 3f * scale);
+            dl.AddRect(origin, origin + box, Paint.Col(FF7RTheme.WithAlpha(FF7RTheme.LimitRed, hover * 0.65f)), 3f * scale);
+        }
+
+        // Geometric Cross (X)
+        var crossR = 3.5f * scale;
+        var lineCol = Vector4.Lerp(FF7RTheme.TextSecondary, FF7RTheme.LimitRed, hover);
+        var thickness = 1.6f * scale;
+        dl.AddLine(center - new Vector2(crossR, crossR), center + new Vector2(crossR, crossR), Paint.Col(lineCol), thickness);
+        dl.AddLine(center + new Vector2(-crossR, crossR), center + new Vector2(crossR, -crossR), Paint.Col(lineCol), thickness);
+
+        if (hit.Hovered)
+        {
+            ImGui.SetTooltip(Loc.Get("Close"));
+        }
+
+        if (hit.Clicked)
         {
             window.IsOpen = false;
         }
+    }
 
-        // Compact toggle button (Chevron)
-        ImGui.SetCursorScreenPos(new Vector2(end.X - padX - buttonSize - stride, top));
-        var icon = compact ? FontAwesomeIcon.ChevronDown : FontAwesomeIcon.ChevronUp;
-        if (IconButton.Draw(icon, "##akb_minimize", buttonSize, tooltip: compact ? Loc.Get("Expand") : Loc.Get("Compact")))
+    private static void DrawCompactButton(MainWindow window, Vector2 origin, float size, float scale, bool compact)
+    {
+        ImGui.SetCursorScreenPos(origin);
+        var box = new Vector2(size, size);
+        var hit = Hit.Area("##akb_minimize", box);
+        var hover = Motion.Hover(Motion.Key("##akb_minimize"), hit.Hovered);
+        var dl = ImGui.GetWindowDrawList();
+        var center = origin + box * 0.5f;
+
+        // Hover background
+        if (hover > 0.01f)
+        {
+            var alpha = hover * (hit.Held ? 0.9f : 0.65f);
+            dl.AddRectFilled(origin, origin + box, Paint.Col(FF7RTheme.WithAlpha(FF7RTheme.Surface2, alpha)), 3f * scale);
+            dl.AddRect(origin, origin + box, Paint.Col(FF7RTheme.WithAlpha(FF7RTheme.BorderDim, alpha)), 3f * scale);
+        }
+
+        // Geometric Chevron (▲ if expanded to collapse, ▼ if compact to expand)
+        var lineCol = Vector4.Lerp(FF7RTheme.TextSecondary, FF7RTheme.MakoCyan, hover * 0.85f);
+        var thickness = 1.6f * scale;
+        var halfW = 3.8f * scale;
+        var halfH = 2.2f * scale;
+
+        if (compact)
+        {
+            // Pointing Down (expand)
+            var p1 = center + new Vector2(-halfW, -halfH);
+            var p2 = center + new Vector2(0f, halfH);
+            var p3 = center + new Vector2(halfW, -halfH);
+            dl.AddLine(p1, p2, Paint.Col(lineCol), thickness);
+            dl.AddLine(p2, p3, Paint.Col(lineCol), thickness);
+        }
+        else
+        {
+            // Pointing Up (compact)
+            var p1 = center + new Vector2(-halfW, halfH);
+            var p2 = center + new Vector2(0f, -halfH);
+            var p3 = center + new Vector2(halfW, halfH);
+            dl.AddLine(p1, p2, Paint.Col(lineCol), thickness);
+            dl.AddLine(p2, p3, Paint.Col(lineCol), thickness);
+        }
+
+        if (hit.Hovered)
+        {
+            ImGui.SetTooltip(compact ? Loc.Get("Expand") : Loc.Get("Compact"));
+        }
+
+        if (hit.Clicked)
         {
             window.ToggleCompact();
         }
+    }
 
-        // Language selector button (Globe)
-        ImGui.SetCursorScreenPos(new Vector2(end.X - padX - buttonSize - stride * 2f, top));
+    private static void DrawLanguageButton(Vector2 origin, float width, float height, float scale)
+    {
+        ImGui.SetCursorScreenPos(origin);
+        var box = new Vector2(width, height);
+        var hit = Hit.Area("##akb_lang", box);
+        var hover = Motion.Hover(Motion.Key("##akb_lang"), hit.Hovered);
+        var dl = ImGui.GetWindowDrawList();
+        var center = origin + box * 0.5f;
+
         var currentLangCode = Loc.GetLanguageShortName(Loc.CurrentLanguage);
-        var langTooltip = $"{Loc.Get("LangTooltip")} [{currentLangCode}]";
-        if (IconButton.Draw(FontAwesomeIcon.Globe, "##akb_lang", buttonSize, tooltip: langTooltip))
+
+        // Tactical pill badge styling
+        var bgAlpha = hover > 0.01f ? (hit.Held ? 0.85f : 0.65f) : 0.35f;
+        var borderCol = Vector4.Lerp(FF7RTheme.BorderDim, FF7RTheme.MakoCyan, hover * 0.85f);
+        var textCol = Vector4.Lerp(FF7RTheme.TextStrong, FF7RTheme.MakoCyan, hover);
+
+        dl.AddRectFilled(origin, origin + box, Paint.Col(FF7RTheme.WithAlpha(FF7RTheme.Surface2, bgAlpha)), 3f * scale);
+        dl.AddRect(origin, origin + box, Paint.Col(borderCol), 3f * scale);
+
+        var textSize = ImGui.CalcTextSize(currentLangCode);
+        dl.AddText(center - textSize * 0.5f, Paint.Col(textCol), currentLangCode);
+
+        if (hit.Hovered)
+        {
+            var langTooltip = $"{Loc.Get("LangTooltip")} [{currentLangCode}]";
+            ImGui.SetTooltip(langTooltip);
+        }
+
+        if (hit.Clicked)
         {
             ImGui.OpenPopup("##akb_lang_popup");
         }

@@ -1,5 +1,6 @@
 using Dalamud.Bindings.ImGui;
 using Dalamud.Interface;
+using Dalamud.Interface.Utility.Raii;
 using System.Numerics;
 
 namespace AutoKeyboundBrawler.UI.Components;
@@ -25,8 +26,12 @@ internal static class IconButton
         var tint = color ?? FF7RTheme.TextSecondary;
         var glyphColor = enabled ? Vector4.Lerp(tint, FF7RTheme.MakoCyan, hover * 0.75f) : FF7RTheme.TextMuted;
         var glyph = icon.ToIconString();
-        var glyphSize = ImGui.CalcTextSize(glyph);
-        dl.AddText(center - glyphSize * 0.5f, Paint.Col(glyphColor), glyph);
+
+        using (ImRaii.PushFont(UiBuilder.IconFont))
+        {
+            var glyphSize = ImGui.CalcTextSize(glyph);
+            dl.AddText(center - glyphSize * 0.5f, Paint.Col(glyphColor), glyph);
+        }
 
         if (hit.Hovered && !string.IsNullOrEmpty(tooltip))
         {
