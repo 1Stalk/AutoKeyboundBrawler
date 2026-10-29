@@ -13,12 +13,14 @@ public unsafe class KTGInputSimulator
         public readonly SeVirtualKey VirtualKey;
         public readonly char Character;
         public readonly bool IsUnicode;
+        public readonly bool RequiresShift;
 
-        public KeyAction(SeVirtualKey vk)
+        public KeyAction(SeVirtualKey vk, bool shift = false)
         {
             VirtualKey = vk;
             Character = '\0';
             IsUnicode = false;
+            RequiresShift = shift;
         }
 
         public KeyAction(char c)
@@ -26,6 +28,7 @@ public unsafe class KTGInputSimulator
             VirtualKey = SeVirtualKey.NO_KEY;
             Character = c;
             IsUnicode = true;
+            RequiresShift = false;
         }
     }
 
@@ -61,9 +64,9 @@ public unsafe class KTGInputSimulator
                 continue;
             }
 
-            if (TryCharToVirtualKey(ch, out var vk))
+            if (TryCharToVirtualKey(ch, out var vk, out var shift))
             {
-                _pendingActions.Enqueue(new KeyAction(vk));
+                _pendingActions.Enqueue(new KeyAction(vk, shift));
             }
             else
             {
@@ -110,6 +113,10 @@ public unsafe class KTGInputSimulator
         if (action.IsUnicode)
         {
             SendUnicodeChar(action.Character);
+        }
+        else if (action.RequiresShift)
+        {
+            SendKeyWithShift(action.VirtualKey);
         }
         else
         {
@@ -217,6 +224,55 @@ public unsafe class KTGInputSimulator
         var vk = (byte)key;
         PInvoke.keybd_event(vk, 0, 0, 0);
         PInvoke.keybd_event(vk, 0, KEYEVENTF_KEYUP, 0);
+    }
+
+    public static void SendKeyWithShift(SeVirtualKey key)
+    {
+        const ushort VK_SHIFT = 0x10;
+        var vk = (ushort)key;
+
+        try
+        {
+            var inputs = new INPUT[4];
+            // 1. Shift Down
+            inputs[0] = new INPUT
+            {
+                type = INPUT_KEYBOARD,
+                u = new InputUnion { ki = new KEYBDINPUT { wVk = VK_SHIFT, dwFlags = 0 } }
+            };
+            // 2. Key Down
+            inputs[1] = new INPUT
+            {
+                type = INPUT_KEYBOARD,
+                u = new InputUnion { ki = new KEYBDINPUT { wVk = vk, dwFlags = 0 } }
+            };
+            // 3. Key Up
+            inputs[2] = new INPUT
+            {
+                type = INPUT_KEYBOARD,
+                u = new InputUnion { ki = new KEYBDINPUT { wVk = vk, dwFlags = KEYEVENTF_KEYUP } }
+            };
+            // 4. Shift Up
+            inputs[3] = new INPUT
+            {
+                type = INPUT_KEYBOARD,
+                u = new InputUnion { ki = new KEYBDINPUT { wVk = VK_SHIFT, dwFlags = KEYEVENTF_KEYUP } }
+            };
+
+            if (PInvoke.SendInput((uint)inputs.Length, inputs, sizeof(INPUT)) > 0)
+            {
+                return;
+            }
+        }
+        catch
+        {
+        }
+
+        // Fallback using keybd_event
+        PInvoke.keybd_event((byte)VK_SHIFT, 0, 0, 0);
+        PInvoke.keybd_event((byte)vk, 0, 0, 0);
+        PInvoke.keybd_event((byte)vk, 0, KEYEVENTF_KEYUP, 0);
+        PInvoke.keybd_event((byte)VK_SHIFT, 0, KEYEVENTF_KEYUP, 0);
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -345,8 +401,10 @@ public unsafe class KTGInputSimulator
         return (SeVirtualKey)0xDD;
     }
 
-    private static bool TryCharToVirtualKey(char c, out SeVirtualKey key)
+    private static bool TryCharToVirtualKey(char c, out SeVirtualKey key, out bool shift)
     {
+        shift = false;
+
         // 1. Direct German QWERTZ OEM virtual key mapping
         // On German layout: ä/Ä = VK_OEM_7 (0xDE), ö/Ö = VK_OEM_3 (0xC0), ü/Ü = VK_OEM_1 (0xBA), ß = VK_OEM_4 (0xDB)
         switch (c)
@@ -393,14 +451,28 @@ public unsafe class KTGInputSimulator
                 return true;
         }
 
-        // 3. Digits '0'..'9': MUST be mapped to Numpad virtual keys (0x60..0x69) BEFORE VkKeyScan.
-        // On French AZERTY, physical top-row keys 0..9 require Shift and produce &, é, ", ', (, -, è, _, ç, à unshifted.
-        // VkKeyScan('1') on AZERTY returns VK 0x31 (KEY_1) with shift state 1; sending 0x31 without Shift produces '&'.
-        // Numeric keypad keys (NUMPAD0..NUMPAD9, 0x60..0x69) unconditionally produce digits '0'..'9'
-        // across all keyboard layouts in Windows and FFXIV without requiring Shift.
+        // 3. Digits '0'..'9': MUST be mapped to top-row number keys (KEY_0..KEY_9, 0x30..0x39).
+        // Numpad keys (0x60..0x69) MUST NOT be used because FFXIV treats them as movement/camera binds
+        // and does not type them into the minigame input.
         if (c is >= '0' and <= '9')
         {
-            key = (SeVirtualKey)((int)SeVirtualKey.NUMPAD0 + (c - '0'));
+            var fallbackVk = (SeVirtualKey)((int)SeVirtualKey.KEY_0 + (c - '0'));
+
+            // Check active Windows keyboard layout via VkKeyScan.
+            // On French AZERTY, physical top-row keys 0..9 require Shift (shiftState == 1),
+            // while on QWERTY, QWERTZ, Japanese, etc. shiftState is 0.
+            var digitScan = PInvoke.VkKeyScan(c);
+            if (digitScan != -1)
+            {
+                var scanVk = (byte)(digitScan & 0xFF);
+                var shiftState = (byte)((digitScan >> 8) & 0xFF);
+                shift = (shiftState & 1) != 0;
+                key = scanVk != 0 ? (SeVirtualKey)scanVk : fallbackVk;
+            }
+            else
+            {
+                key = fallbackVk;
+            }
             return true;
         }
 
@@ -420,6 +492,12 @@ public unsafe class KTGInputSimulator
             if (vk != 0 && (shiftState == 0 || (c is >= 'a' and <= 'z') || (c is >= 'A' and <= 'Z')))
             {
                 key = (SeVirtualKey)vk;
+                return true;
+            }
+            else if (vk != 0 && (shiftState & 1) != 0)
+            {
+                key = (SeVirtualKey)vk;
+                shift = true;
                 return true;
             }
         }
