@@ -2,7 +2,7 @@
 <Project Sdk="Dalamud.NET.Sdk/15.0.0">
     <PropertyGroup>
         <Authors>1Stalk</Authors>
-        <Version>1.0.3.0</Version>
+        <Version>1.0.4.0</Version>
         <Description>Automated assistant and typing solver for Keybound Brawler.</Description>
         <AssemblyName>AutoKeyboundBrawler</AssemblyName>
         <RootNamespace>AutoKeyboundBrawler</RootNamespace>

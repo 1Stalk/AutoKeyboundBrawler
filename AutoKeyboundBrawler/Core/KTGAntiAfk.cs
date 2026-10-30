@@ -26,58 +26,47 @@ public static unsafe class KTGAntiAfk
     private static DateTime _lastWarnLogTime = DateTime.MinValue;
     private static IntPtr _cachedGameHwnd = IntPtr.Zero;
 
-    public static void KeepAlive()
+    public static bool ShouldKeepAlive(Configuration config)
     {
+        if (!config.Enabled)
+        {
+            return false;
+        }
+
+        if (!config.MinigameAutoplay && !config.AutoLoopEnabled)
+        {
+            return false;
+        }
+
+        // Anti-AFK functions ONLY work when the player is currently inside the Keybound Brawler event duty
+        if (!KTGSafetyGuard.IsInEventDuty)
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    public static void KeepAlive(Configuration? config = null, bool force = false)
+    {
+        config ??= Plugin.Configuration;
+        if (!force && (config == null || !ShouldKeepAlive(config)))
+        {
+            return;
+        }
+
+        // Hard safety gate: never execute anti-AFK outside Keybound Brawler event duty
+        if (!force && !KTGSafetyGuard.IsInEventDuty)
+        {
+            return;
+        }
+
         var now = DateTime.UtcNow;
 
-        // ── Layer 1: Inject a harmless key via KeyboardDevice ─────────────
-        // Send a Shift press/release through the game's internal keyboard
-        // device every 3 seconds. This goes through the same code path as
-        // real player keypresses and is the only method proven to reset the
-        // content inactivity timer on Japanese clients.
-        // Shift alone has no gameplay effect (no character produced, no action).
-        if ((now - _lastKeystrokeTime).TotalSeconds >= 3.0)
-        {
-            _lastKeystrokeTime = now;
-            try
-            {
-                var manager = InputDeviceManager.Instance();
-                if (manager != null && manager->KeyboardDevice != null)
-                {
-                    manager->KeyboardDevice->SendKey(SeVirtualKey.SHIFT);
-                }
-            }
-            catch
-            {
-                // Layer 2+ will cover us
-            }
-        }
-
-        // ── Layer 2: SendMessage to the actual FFXIV game window ─────────
-        // Use FindWindow("FFXIVGAME") to find the real game window, NOT
-        // Process.MainWindowHandle which can return an IME composition window
-        // on Japanese systems. Use SendMessage (synchronous) for guaranteed
-        // delivery of WM_KEYDOWN/WM_KEYUP.
-        if ((now - _lastWndMsgTime).TotalSeconds >= 3.0)
-        {
-            _lastWndMsgTime = now;
-            try
-            {
-                var hwnd = GetGameWindowHandle();
-                if (hwnd != IntPtr.Zero)
-                {
-                    // Keyboard activity signal (Shift down + up)
-                    NativeMethods.SendMessage(hwnd, NativeMethods.WM_KEYDOWN, (IntPtr)NativeMethods.VK_SHIFT, IntPtr.Zero);
-                    NativeMethods.SendMessage(hwnd, NativeMethods.WM_KEYUP, (IntPtr)NativeMethods.VK_SHIFT, unchecked((IntPtr)(int)0xC0100001));
-                }
-            }
-            catch
-            {
-                // Ignore — other layers will cover us
-            }
-        }
-
         // ── Layer 3: Direct InputTimerModule field zeroing ────────────────
+        // Safely zero top-level and per-device timers in game memory.
+        // This is completely silent, does not touch OS keyboard state,
+        // and works even when the game window is in the background.
         try
         {
             var timerModule = InputTimerModule.Instance();
@@ -112,6 +101,61 @@ public static unsafe class KTGAntiAfk
         catch (Exception ex)
         {
             LogDiag($"[AntiAfk] InputTimerModule reset failed: {ex.Message}");
+        }
+
+        // Hardware / OS keystroke layers (Layer 1 & Layer 2):
+        // STRICT SAFETY RULES:
+        // 1. NEVER simulate keystrokes if the game window does NOT have foreground focus!
+        //    Sending keys when unfocused injects them into the user's active window (Discord, browser).
+        // 2. NEVER simulate Shift if the player is physically holding the Shift key!
+        //    Sending a synthetic Shift KeyUp releases their physical Shift in the OS.
+        // 3. Throttle keystrokes to at most once per 30 seconds (content kick limits are 120s+).
+        if (!NativeMethods.IsGameFocused())
+        {
+            return;
+        }
+
+        if (NativeMethods.IsShiftPressed())
+        {
+            return;
+        }
+
+        // ── Layer 1: Inject a harmless key via KeyboardDevice ─────────────
+        if ((now - _lastKeystrokeTime).TotalSeconds >= 30.0)
+        {
+            _lastKeystrokeTime = now;
+            try
+            {
+                var manager = InputDeviceManager.Instance();
+                if (manager != null && manager->KeyboardDevice != null)
+                {
+                    manager->KeyboardDevice->SendKey(SeVirtualKey.SHIFT);
+                }
+            }
+            catch
+            {
+                // Layer 2+ will cover us
+            }
+        }
+
+        // ── Layer 2: SendMessage to the actual FFXIV game window ─────────
+        if ((now - _lastWndMsgTime).TotalSeconds >= 30.0)
+        {
+            _lastWndMsgTime = now;
+            try
+            {
+                var hwnd = GetGameWindowHandle();
+                if (hwnd != IntPtr.Zero)
+                {
+                    // Keyboard activity signal (Shift down + up)
+                    NativeMethods.SendMessage(hwnd, NativeMethods.WM_KEYDOWN, (IntPtr)NativeMethods.VK_SHIFT, IntPtr.Zero);
+                    NativeMethods.SendMessage(hwnd, NativeMethods.WM_KEYUP, (IntPtr)NativeMethods.VK_SHIFT, unchecked((IntPtr)(int)0xC0100001));
+                }
+            }
+            catch
+            {
+                // Ignore — other layers will cover us
+            }
         }
     }
 

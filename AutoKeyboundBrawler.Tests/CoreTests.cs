@@ -377,5 +377,689 @@ public class CoreTests
         var exception = Record.Exception(() => KTGAntiAfk.KeepAlive());
         Assert.Null(exception);
     }
+
+    [Fact]
+    public void TestNativeMethods_IsGameFocused_OverridesAndDefault()
+    {
+        try
+        {
+            NativeMethods.SetGameFocusedOverrideForTesting(true);
+            Assert.True(NativeMethods.IsGameFocused());
+
+            NativeMethods.SetGameFocusedOverrideForTesting(false);
+            Assert.False(NativeMethods.IsGameFocused());
+        }
+        finally
+        {
+            NativeMethods.SetGameFocusedOverrideForTesting(null);
+        }
+
+        // Without override, should evaluate without throwing
+        var noThrowException = Record.Exception(() => NativeMethods.IsGameFocused());
+        Assert.Null(noThrowException);
+    }
+
+    [Fact]
+    public void TestNativeMethods_IsShiftPressed_OverridesAndDefault()
+    {
+        try
+        {
+            NativeMethods.SetShiftPressedOverrideForTesting(true);
+            Assert.True(NativeMethods.IsShiftPressed());
+
+            NativeMethods.SetShiftPressedOverrideForTesting(false);
+            Assert.False(NativeMethods.IsShiftPressed());
+        }
+        finally
+        {
+            NativeMethods.SetShiftPressedOverrideForTesting(null);
+        }
+
+        var noThrowException = Record.Exception(() => NativeMethods.IsShiftPressed());
+        Assert.Null(noThrowException);
+    }
+
+    [Fact]
+    public void TestKTGSafetyGuard_CanType_WindowFocusSafety()
+    {
+        try
+        {
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(inDuty: true, inSquare: false);
+            var config = new Configuration { Enabled = true, MinigameAutoplay = true, RequireWindowFocus = true, StopOnPenaltyCast = false };
+
+            // 1. When game window is NOT focused, CanType MUST fail with "Game window is not focused"
+            NativeMethods.SetGameFocusedOverrideForTesting(false);
+            var canTypeUnfocused = KTGSafetyGuard.CanType(config, out var reasonUnfocused);
+            Assert.False(canTypeUnfocused);
+            Assert.Equal("Game window is not focused", reasonUnfocused);
+
+            // 2. When game window IS focused, CanType succeeds
+            NativeMethods.SetGameFocusedOverrideForTesting(true);
+            var canTypeFocused = KTGSafetyGuard.CanType(config, out var reasonFocused);
+            Assert.True(canTypeFocused);
+            Assert.Equal("OK", reasonFocused);
+
+            // 3. When RequireWindowFocus is disabled, unfocused does not block typing
+            config.RequireWindowFocus = false;
+            NativeMethods.SetGameFocusedOverrideForTesting(false);
+            var canTypeNoReq = KTGSafetyGuard.CanType(config, out var reasonNoReq);
+            Assert.True(canTypeNoReq);
+            Assert.Equal("OK", reasonNoReq);
+        }
+        finally
+        {
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(null, null);
+            NativeMethods.SetGameFocusedOverrideForTesting(null);
+        }
+    }
+
+    [Fact]
+    public void TestKTGAntiAfk_ShouldKeepAlive_TerritoryAndConfigScoping()
+    {
+        try
+        {
+            var config = new Configuration
+            {
+                Enabled = true,
+                MinigameAutoplay = true,
+                AutoLoopEnabled = true
+            };
+
+            // Case 1: Outside of Gold Saucer / Duty (e.g. Limsa Lominsa / normal world)
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(inDuty: false, inSquare: false);
+            Assert.False(KTGAntiAfk.ShouldKeepAlive(config));
+
+            // Case 2: Inside Keybound Brawler Duty
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(inDuty: true, inSquare: false);
+            // With MinigameAutoplay=true and AutoLoopEnabled=false: keepalive in duty
+            config.MinigameAutoplay = true;
+            config.AutoLoopEnabled = false;
+            Assert.True(KTGAntiAfk.ShouldKeepAlive(config));
+
+            // With MinigameAutoplay=false and AutoLoopEnabled=true: keepalive in duty
+            config.MinigameAutoplay = false;
+            config.AutoLoopEnabled = true;
+            Assert.True(KTGAntiAfk.ShouldKeepAlive(config));
+
+            // With both false: no keepalive in duty
+            config.MinigameAutoplay = false;
+            config.AutoLoopEnabled = false;
+            Assert.False(KTGAntiAfk.ShouldKeepAlive(config));
+
+            // Case 3: In Keybound Square with AutoLoop active (Anti-AFK must ONLY work inside event duty)
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(inDuty: false, inSquare: true);
+            config.AutoLoopEnabled = true;
+            config.MinigameAutoplay = false;
+            Assert.False(KTGAntiAfk.ShouldKeepAlive(config));
+
+            // Case 4: In Keybound Square with MinigameAutoplay active
+            config.AutoLoopEnabled = false;
+            config.MinigameAutoplay = true;
+            Assert.False(KTGAntiAfk.ShouldKeepAlive(config));
+
+            // Case 5: Master Enabled is false
+            config.Enabled = false;
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(inDuty: true, inSquare: false);
+            Assert.False(KTGAntiAfk.ShouldKeepAlive(config));
+        }
+        finally
+        {
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(null, null);
+        }
+    }
+
+    [Fact]
+    public void TestKTGAntiAfk_KeepAlive_SafetyChecks()
+    {
+        try
+        {
+            // When game is unfocused, KeepAlive executes Layer 3 memory reset safely without sending keystrokes
+            NativeMethods.SetGameFocusedOverrideForTesting(false);
+            var exUnfocused = Record.Exception(() => KTGAntiAfk.KeepAlive(force: true));
+            Assert.Null(exUnfocused);
+
+            // When shift is physically held, KeepAlive executes without sending keystrokes
+            NativeMethods.SetGameFocusedOverrideForTesting(true);
+            NativeMethods.SetShiftPressedOverrideForTesting(true);
+            var exShiftHeld = Record.Exception(() => KTGAntiAfk.KeepAlive(force: true));
+            Assert.Null(exShiftHeld);
+        }
+        finally
+        {
+            NativeMethods.SetGameFocusedOverrideForTesting(null);
+            NativeMethods.SetShiftPressedOverrideForTesting(null);
+        }
+    }
+
+    [Fact]
+    public void TestKTGInputSimulator_UnfocusedBlocksKeyEmulation()
+    {
+        try
+        {
+            NativeMethods.SetGameFocusedOverrideForTesting(false);
+
+            // 1. SendKey when unfocused returns immediately without throwing
+            var exSendKey = Record.Exception(() => KTGInputSimulator.SendKey(FFXIVClientStructs.FFXIV.Client.System.Input.SeVirtualKey.A));
+            Assert.Null(exSendKey);
+
+            // 2. SendKeyWithShift when unfocused returns immediately without throwing
+            var exSendKeyShift = Record.Exception(() => KTGInputSimulator.SendKeyWithShift(FFXIVClientStructs.FFXIV.Client.System.Input.SeVirtualKey.A));
+            Assert.Null(exSendKeyShift);
+
+            // 3. SendUnicodeChar when unfocused returns immediately without throwing
+            var exUnicode = Record.Exception(() => KTGInputSimulator.SendUnicodeChar('z'));
+            Assert.Null(exUnicode);
+
+            // 4. TryClearInputBuffer when unfocused returns false immediately
+            var cleared = KTGInputSimulator.TryClearInputBuffer();
+            Assert.False(cleared);
+
+            // 5. Update when unfocused does NOT type pending characters
+            var sim = new KTGInputSimulator();
+            var config = new Configuration { RequireWindowFocus = true };
+            sim.EnqueueWord("Test", config);
+            var initialRemaining = sim.RemainingChars;
+            Assert.True(initialRemaining > 0);
+
+            // Call Update while unfocused
+            sim.Update(config);
+            Assert.Equal(initialRemaining, sim.RemainingChars);
+        }
+        finally
+        {
+            NativeMethods.SetGameFocusedOverrideForTesting(null);
+        }
+    }
+
+    [Fact]
+    public void TestKTGInputSimulator_SendKeyWithShift_PreservesPhysicalShift()
+    {
+        try
+        {
+            NativeMethods.SetGameFocusedOverrideForTesting(true);
+            NativeMethods.SetShiftPressedOverrideForTesting(true);
+
+            // When user is physically holding Shift, SendKeyWithShift should only emit keypress and NOT emit Shift Up
+            var ex = Record.Exception(() => KTGInputSimulator.SendKeyWithShift(FFXIVClientStructs.FFXIV.Client.System.Input.SeVirtualKey.KEY_1));
+            Assert.Null(ex);
+        }
+        finally
+        {
+            NativeMethods.SetGameFocusedOverrideForTesting(null);
+            NativeMethods.SetShiftPressedOverrideForTesting(null);
+        }
+    }
+
+    [Fact]
+    public void TestKTGInputSimulator_RequireWindowFocusFalse_AllowsTypingWhenUnfocused()
+    {
+        try
+        {
+            NativeMethods.SetGameFocusedOverrideForTesting(false);
+
+            var configFocused = new Configuration { RequireWindowFocus = true };
+            var configUnfocused = new Configuration { RequireWindowFocus = false };
+
+            // 1. ShouldBlockInput evaluation
+            Assert.True(KTGInputSimulator.ShouldBlockInput(configFocused));
+            Assert.False(KTGInputSimulator.ShouldBlockInput(configUnfocused));
+
+            // 2. Global Plugin.Configuration fallback when config is null
+            Plugin.Configuration = configUnfocused;
+            Assert.False(KTGInputSimulator.ShouldBlockInput(null));
+            Plugin.Configuration = configFocused;
+            Assert.True(KTGInputSimulator.ShouldBlockInput(null));
+
+            // 3. When RequireWindowFocus is false, Update allows processing even when unfocused
+            var sim = new KTGInputSimulator();
+            configUnfocused.CharDelayMinMs = 10;
+            configUnfocused.CharDelayMaxMs = 10;
+            sim.EnqueueWord("A", configUnfocused);
+            var initialRemaining = sim.RemainingChars;
+            Assert.True(initialRemaining > 0);
+
+            System.Threading.Thread.Sleep(25);
+            sim.Update(configUnfocused);
+            Assert.True(sim.RemainingChars < initialRemaining);
+        }
+        finally
+        {
+            NativeMethods.SetGameFocusedOverrideForTesting(null);
+            Plugin.Configuration = null!;
+        }
+    }
+
+    [Fact]
+    public void TestKTGAntiAfk_KeepAlive_ResolvesPluginConfiguration()
+    {
+        try
+        {
+            // Outside of duty, Plugin.Configuration with MinigameAutoplay=true should NOT keepalive
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(inDuty: false, inSquare: false);
+            Plugin.Configuration = new Configuration { Enabled = true, MinigameAutoplay = true };
+
+            // Should resolve Plugin.Configuration and return early safely
+            var ex = Record.Exception(() => KTGAntiAfk.KeepAlive());
+            Assert.Null(ex);
+        }
+        finally
+        {
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(null, null);
+            Plugin.Configuration = null!;
+        }
+    }
+
+    [Fact]
+    public void TestKTGAntiAfk_IdleModeWhenNeitherCheckboxActive()
+    {
+        try
+        {
+            var config = new Configuration
+            {
+                Enabled = true,
+                MinigameAutoplay = false,
+                AutoLoopEnabled = false
+            };
+
+            // 1. Inside Duty: when both checkboxes false, ShouldKeepAlive is false
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(inDuty: true, inSquare: false);
+            Assert.False(KTGAntiAfk.ShouldKeepAlive(config));
+
+            // 2. In Square: when both checkboxes false, ShouldKeepAlive is false
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(inDuty: false, inSquare: true);
+            Assert.False(KTGAntiAfk.ShouldKeepAlive(config));
+
+            // 3. When Enabled is false: ShouldKeepAlive is false even if individual checkboxes are true
+            config.MinigameAutoplay = true;
+            config.AutoLoopEnabled = true;
+            config.Enabled = false;
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(inDuty: true, inSquare: false);
+            Assert.False(KTGAntiAfk.ShouldKeepAlive(config));
+
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(inDuty: false, inSquare: true);
+            Assert.False(KTGAntiAfk.ShouldKeepAlive(config));
+
+            // 4. KeepAlive with idle config returns safely without throwing or executing
+            config.Enabled = true;
+            config.MinigameAutoplay = false;
+            config.AutoLoopEnabled = false;
+            var ex = Record.Exception(() => KTGAntiAfk.KeepAlive(config));
+            Assert.Null(ex);
+        }
+        finally
+        {
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(null, null);
+        }
+    }
+
+    [Fact]
+    public void TestKTGAutomationManager_IdleModeWhenNeitherCheckboxActive()
+    {
+        var config = new Configuration
+        {
+            Enabled = true,
+            MinigameAutoplay = false,
+            AutoLoopEnabled = false
+        };
+
+        var manager = new KTGAutomationManager(config, null!);
+
+        // Call Tick when neither checkbox is active
+        manager.Tick();
+
+        // Must enter idle mode and not interfere
+        Assert.Equal("Idle (Automation paused)", manager.CurrentStatus);
+        Assert.Equal(EventPhase.None, manager.CurrentPhase);
+        Assert.False(manager.IsTyping);
+        Assert.False(manager.IsInDutyPhase);
+        Assert.False(manager.IsInQueuePhase);
+        Assert.False(manager.IsHaltStatus);
+    }
+
+    [Fact]
+    public void TestMainWindow_OriginalDimensionsAndFocusSafety()
+    {
+        var flags = System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static;
+        var defaultSizeField = typeof(AutoKeyboundBrawler.UI.MainWindow).GetField("DefaultSize", flags);
+        Assert.NotNull(defaultSizeField);
+        var defaultSize = (System.Numerics.Vector2)defaultSizeField.GetValue(null)!;
+        Assert.Equal(280f, defaultSize.X);
+        Assert.Equal(290f, defaultSize.Y);
+
+        var constraintsField = typeof(AutoKeyboundBrawler.UI.MainWindow).GetField("ExpandedConstraints", flags);
+        Assert.NotNull(constraintsField);
+        var constraints = (Dalamud.Interface.Windowing.WindowSizeConstraints)constraintsField.GetValue(null)!;
+        Assert.Equal(480f, constraints.MaximumSize.Y);
+
+        // Verify background focus safety remains active by default
+        var config = new Configuration();
+        Assert.True(config.RequireWindowFocus);
+        config.Initialize(null!);
+        Assert.True(config.RequireWindowFocus);
+    }
+
+    [Fact]
+    public void TestKTGAutomationManager_TypingSolverOnlyDoesNotInterfereInSquare()
+    {
+        try
+        {
+            var config = new Configuration
+            {
+                Enabled = true,
+                MinigameAutoplay = true,
+                AutoLoopEnabled = false
+            };
+
+            // In Square: MinigameAutoplay=true must not trigger keep-alive
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(inDuty: false, inSquare: true);
+            Assert.False(KTGAntiAfk.ShouldKeepAlive(config));
+
+            var manager = new KTGAutomationManager(config, null!);
+            manager.Tick();
+
+            // Status is square, but loop automation and typing are not active
+            Assert.Equal("In Keybound Square", manager.CurrentStatus);
+            Assert.Equal(EventPhase.InSquare, manager.CurrentPhase);
+            Assert.False(manager.IsTyping);
+
+            // In Duty: MinigameAutoplay=true DOES trigger keep-alive
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(inDuty: true, inSquare: false);
+            Assert.True(KTGAntiAfk.ShouldKeepAlive(config));
+        }
+        finally
+        {
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(null, null);
+        }
+    }
+
+    [Fact]
+    public void TestKTGAutomationManager_AfkLoopOnlyKeepsAliveInDuty()
+    {
+        try
+        {
+            var config = new Configuration
+            {
+                Enabled = true,
+                MinigameAutoplay = false,
+                AutoLoopEnabled = true
+            };
+
+            // In Duty: AutoLoopEnabled=true triggers keep-alive even when MinigameAutoplay=false
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(inDuty: true, inSquare: false);
+            Assert.True(KTGAntiAfk.ShouldKeepAlive(config));
+
+            var manager = new KTGAutomationManager(config, null!);
+            manager.Tick();
+
+            // In duty, minigame phase does not type when MinigameAutoplay is false
+            Assert.Equal("Minigame Autoplay Disabled", manager.CurrentStatus);
+            Assert.Equal(EventPhase.InMinigame, manager.CurrentPhase);
+            Assert.False(manager.IsTyping);
+
+            // In Square: AutoLoopEnabled=true must NOT trigger keep-alive (strictly duty only)
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(inDuty: false, inSquare: true);
+            Assert.False(KTGAntiAfk.ShouldKeepAlive(config));
+        }
+        finally
+        {
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(null, null);
+        }
+    }
+
+    [Fact]
+    public void TestKTGSafetyGuard_DutyDetectionConstants()
+    {
+        Assert.Equal(1095u, KTGSafetyGuard.DutyContentFinderConditionId);
+        Assert.Equal(1359u, KTGSafetyGuard.DutyTerritoryId);
+        Assert.Equal(1360u, KTGSafetyGuard.SquareTerritoryId);
+    }
+
+    [Fact]
+    public void TestKTGSafetyGuard_IsInEventDuty_UninitializedSafeReturn()
+    {
+        // When uninitialized/not mocked, IsInEventDuty and IsInKeyboundSquare must safely return false without throwing
+        KTGSafetyGuard.SetTerritoryOverridesForTesting(null, null);
+        Assert.False(KTGSafetyGuard.IsInEventDuty);
+        Assert.False(KTGSafetyGuard.IsInKeyboundSquare);
+    }
+
+    [Fact]
+    public void TestKTGAntiAfk_StrictDutyScoping_SquareNeverKeepsAlive()
+    {
+        try
+        {
+            var config = new Configuration
+            {
+                Enabled = true,
+                MinigameAutoplay = true,
+                AutoLoopEnabled = true
+            };
+
+            // In Square: even with both MinigameAutoplay and AutoLoopEnabled true, KeepAlive must NOT trigger
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(inDuty: false, inSquare: true);
+            Assert.False(KTGAntiAfk.ShouldKeepAlive(config));
+
+            // Calling KeepAlive with force=false when in Square must be a no-op
+            var ex = Record.Exception(() => KTGAntiAfk.KeepAlive(config, force: false));
+            Assert.Null(ex);
+
+            // In open world / other territories: KeepAlive must NOT trigger
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(inDuty: false, inSquare: false);
+            Assert.False(KTGAntiAfk.ShouldKeepAlive(config));
+
+            // ONLY inside duty does KeepAlive trigger
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(inDuty: true, inSquare: false);
+            Assert.True(KTGAntiAfk.ShouldKeepAlive(config));
+        }
+        finally
+        {
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(null, null);
+        }
+    }
+
+    [Fact]
+    public void TestKTGStateReader_GetCurrentPhase_KeyboundSquareReturnsInSquare()
+    {
+        try
+        {
+            // In Keybound Square (lobby), phase must be strictly InSquare, NEVER InMinigame
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(inDuty: false, inSquare: true);
+            Assert.False(KTGSafetyGuard.IsInEventDuty);
+            Assert.True(KTGSafetyGuard.IsInKeyboundSquare);
+            Assert.Equal(EventPhase.InSquare, KTGStateReader.GetCurrentPhase());
+
+            // In Event Duty (arena), phase must be InMinigame
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(inDuty: true, inSquare: false);
+            Assert.True(KTGSafetyGuard.IsInEventDuty);
+            Assert.False(KTGSafetyGuard.IsInKeyboundSquare);
+            Assert.Equal(EventPhase.InMinigame, KTGStateReader.GetCurrentPhase());
+
+            // Outside both (open world), phase is None
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(inDuty: false, inSquare: false);
+            Assert.False(KTGSafetyGuard.IsInEventDuty);
+            Assert.False(KTGSafetyGuard.IsInKeyboundSquare);
+            Assert.Equal(EventPhase.None, KTGStateReader.GetCurrentPhase());
+        }
+        finally
+        {
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(null, null);
+        }
+    }
+
+    [Fact]
+    public void TestKTGAutomationManager_AutoLoopInSquare_OperatesWithoutAntiAfk()
+    {
+        try
+        {
+            var config = new Configuration
+            {
+                Enabled = true,
+                MinigameAutoplay = false,
+                AutoLoopEnabled = true
+            };
+
+            // In Square: AutoLoopEnabled is true. Manager must transition to InSquare phase.
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(inDuty: false, inSquare: true);
+
+            var manager = new KTGAutomationManager(config, null!);
+            manager.Tick();
+
+            Assert.Equal(EventPhase.InSquare, manager.CurrentPhase);
+            // In square, Anti-AFK must NEVER run
+            Assert.False(KTGAntiAfk.ShouldKeepAlive(config));
+            // Simulator should not be typing in the Square
+            Assert.False(manager.IsTyping);
+        }
+        finally
+        {
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(null, null);
+        }
+    }
+
+    [Fact]
+    public void TestKTGSafetyGuard_CanType_BlockedInKeyboundSquare()
+    {
+        try
+        {
+            var config = new Configuration
+            {
+                Enabled = true,
+                MinigameAutoplay = true,
+                AutoLoopEnabled = true,
+                RequireWindowFocus = false
+            };
+
+            // In Square: CanType must return false because player is outside duty
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(inDuty: false, inSquare: true);
+            Assert.False(KTGSafetyGuard.CanType(config, out var reasonSquare));
+            Assert.Equal("Not in Keybound Brawler duty", reasonSquare);
+
+            // In Duty: CanType returns true
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(inDuty: true, inSquare: false);
+            Assert.True(KTGSafetyGuard.CanType(config, out var reasonDuty));
+            Assert.Equal("OK", reasonDuty);
+        }
+        finally
+        {
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(null, null);
+        }
+    }
+
+    [Fact]
+    public void TestKTGAutomationManager_InSquare_BothTogglesActiveNeverTriggersKeepAliveOrTyping()
+    {
+        try
+        {
+            var config = new Configuration
+            {
+                Enabled = true,
+                MinigameAutoplay = true,
+                AutoLoopEnabled = true,
+                RequireWindowFocus = false
+            };
+
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(inDuty: false, inSquare: true);
+
+            var manager = new KTGAutomationManager(config, null!);
+            manager.Tick();
+
+            // Manager correctly identifies InSquare phase
+            Assert.Equal(EventPhase.InSquare, manager.CurrentPhase);
+            Assert.False(manager.IsInDutyPhase);
+
+            // Anti-afk must strictly remain false in Square
+            Assert.False(KTGAntiAfk.ShouldKeepAlive(config));
+
+            // Typing simulator must not be typing in Square
+            Assert.False(manager.IsTyping);
+        }
+        finally
+        {
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(null, null);
+        }
+    }
+
+    [Fact]
+    public void TestKTGLocalizationRegistry_FindNearbyRegistrar_UninitializedNullSafety()
+    {
+        // When Svc.Objects and Svc.Targets are uninitialized / null, FindNearbyRegistrar must safely return null without throwing
+        var ex = Record.Exception(() =>
+        {
+            var result = KTGLocalizationRegistry.FindNearbyRegistrar(12.0f, out var dist);
+            Assert.Null(result);
+            Assert.Equal(float.MaxValue, dist);
+        });
+        Assert.Null(ex);
+    }
+
+    [Fact]
+    public void TestPlugin_UpdateProximityState_WithinRange_TriggersOpen()
+    {
+        var hasTriggered = false;
+
+        // Player walks within interaction range (5.0y <= 7.0y) with window closed
+        var didOpen = Plugin.UpdateProximityState(ref hasTriggered, 5.0f, isCurrentlyOpen: false, out var shouldOpen);
+
+        Assert.True(didOpen);
+        Assert.True(shouldOpen);
+        Assert.True(hasTriggered);
+
+        // Next tick: still in range (5.0y), window is now open -> should not fire again
+        didOpen = Plugin.UpdateProximityState(ref hasTriggered, 5.0f, isCurrentlyOpen: true, out shouldOpen);
+        Assert.False(didOpen);
+        Assert.False(shouldOpen);
+        Assert.True(hasTriggered);
+    }
+
+    [Fact]
+    public void TestPlugin_UpdateProximityState_AlreadyOpen_SetsTriggeredWithoutReopen()
+    {
+        var hasTriggered = false;
+
+        // Window was already opened manually (/akb) when approaching
+        var didOpen = Plugin.UpdateProximityState(ref hasTriggered, 4.0f, isCurrentlyOpen: true, out var shouldOpen);
+
+        Assert.False(didOpen);
+        Assert.False(shouldOpen);
+        Assert.True(hasTriggered);
+    }
+
+    [Fact]
+    public void TestPlugin_UpdateProximityState_Hysteresis_WalkAwayAndReturn()
+    {
+        var hasTriggered = true; // Was previously triggered near NPC
+
+        // Player walks into hysteresis deadband (8.0y, between 7.0y and 9.5y)
+        Plugin.UpdateProximityState(ref hasTriggered, 8.0f, isCurrentlyOpen: false, out var shouldOpen);
+        Assert.True(hasTriggered); // Trigger stays latched
+        Assert.False(shouldOpen);
+
+        // Player walks away past 9.5y (10.0y)
+        Plugin.UpdateProximityState(ref hasTriggered, 10.0f, isCurrentlyOpen: false, out shouldOpen);
+        Assert.False(hasTriggered); // Trigger is reset
+        Assert.False(shouldOpen);
+
+        // Player walks back within 7.0y (6.5y)
+        var didOpen = Plugin.UpdateProximityState(ref hasTriggered, 6.5f, isCurrentlyOpen: false, out shouldOpen);
+        Assert.True(didOpen);
+        Assert.True(shouldOpen);
+        Assert.True(hasTriggered);
+    }
+
+    [Fact]
+    public void TestPlugin_UpdateProximityState_DutyTransition_ResetsTrigger()
+    {
+        var hasTriggered = true;
+
+        // When entering duty, plugin resets _hasTriggeredProximityOpen to false
+        hasTriggered = false;
+
+        // Returning from duty to Square, player is near Registrar (3.0y)
+        var didOpen = Plugin.UpdateProximityState(ref hasTriggered, 3.0f, isCurrentlyOpen: false, out var shouldOpen);
+        Assert.True(didOpen);
+        Assert.True(shouldOpen);
+        Assert.True(hasTriggered);
+    }
 }
+
 

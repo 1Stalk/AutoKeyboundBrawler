@@ -43,6 +43,7 @@ public class Configuration : IPluginConfiguration
 
     // Safety guards
     public bool StopOnPenaltyCast { get; set; } = true;
+    public bool RequireWindowFocus { get; set; } = true;
 
     // Targeting Priorities & Mechanics
     public bool PrioritizeAdds { get; set; } = true;
@@ -60,18 +61,27 @@ public class Configuration : IPluginConfiguration
     {
         _pluginInterface = pi;
 
-        // Combat mechanics are always active
+        // Combat mechanics and safety guards are always active
         StopOnPenaltyCast = true;
+        RequireWindowFocus = true;
         PrioritizeAdds = true;
         PrioritizeDefense = true;
         AbortForDefense = true;
         MemoryModeObscured = true;
 
-        // Automatically sync AutoLoopEnabled if sub-flags are already true
         if (AutoTalkRegistrar && AutoConfirmRegister)
         {
             AutoLoopEnabled = true;
         }
+        else if (!AutoLoopEnabled)
+        {
+            AutoTalkRegistrar = false;
+            AutoConfirmRegister = false;
+            AutoCommenceDuty = false;
+            AutoLeaveResults = false;
+        }
+
+        Enabled = MinigameAutoplay || AutoLoopEnabled;
     }
 
     public void SetMinigameAutoplay(bool val)

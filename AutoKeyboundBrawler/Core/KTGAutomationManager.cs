@@ -57,11 +57,10 @@ public class KTGAutomationManager
 
     public void Tick()
     {
-        CurrentPhase = KTGStateReader.GetCurrentPhase();
-
-        var isActive = _config.MinigameAutoplay || _config.AutoLoopEnabled || _config.Enabled;
+        var isActive = _config.Enabled && (_config.MinigameAutoplay || _config.AutoLoopEnabled);
         if (!isActive)
         {
+            CurrentPhase = EventPhase.None;
             CurrentStatus = "Idle (Automation paused)";
             if (_simulator.IsTyping)
             {
@@ -70,13 +69,18 @@ public class KTGAutomationManager
             return;
         }
 
+        CurrentPhase = KTGStateReader.GetCurrentPhase();
+
         if (!KTGWordDatabase.IsLoaded || KTGWordDatabase.CurrentLanguage != Svc.ClientState.ClientLanguage)
         {
             KTGWordDatabase.Load(Svc.Data, _log);
         }
 
         // Keep-alive: Reset game-internal ContentInputTimer and input timers so FFXIV never auto-kicks for inactivity
-        KTGAntiAfk.KeepAlive();
+        if (KTGAntiAfk.ShouldKeepAlive(_config))
+        {
+            KTGAntiAfk.KeepAlive(_config);
+        }
 
         switch (CurrentPhase)
         {
@@ -229,7 +233,7 @@ public class KTGAutomationManager
         // 6. Pre-Typing Cleanliness: If KTGInput has leftover text, clear it first safely
         if (!AddonKTGInput.IsInputEmpty())
         {
-            if (KTGInputSimulator.TryClearInputBuffer())
+            if (KTGInputSimulator.TryClearInputBuffer(_config))
             {
                 CurrentStatus = "Clearing dirty input buffer...";
             }
@@ -266,7 +270,7 @@ public class KTGAutomationManager
             case HaltRecoveryState.SendEnter:
                 _log.Information("[AutoKeyboundBrawler] Exiting halt: pressing Enter to activate text input window...");
                 CurrentStatus = "Halt Recovery: Activating text input (Enter)...";
-                KTGInputSimulator.SendKey(FFXIVClientStructs.FFXIV.Client.System.Input.SeVirtualKey.RETURN);
+                KTGInputSimulator.SendKey(FFXIVClientStructs.FFXIV.Client.System.Input.SeVirtualKey.RETURN, _config);
                 _lastHaltRecoveryTime = DateTime.UtcNow;
                 _haltRecoveryState = HaltRecoveryState.WaitAfterEnter;
                 return true;
@@ -284,7 +288,7 @@ public class KTGAutomationManager
                 {
                     _log.Information("[AutoKeyboundBrawler] Input has cancelled text after halt. Pressing Escape to clear...");
                     CurrentStatus = "Halt Recovery: Cancelling leftover text (Esc)...";
-                    KTGInputSimulator.SendKey(FFXIVClientStructs.FFXIV.Client.System.Input.SeVirtualKey.ESCAPE);
+                    KTGInputSimulator.SendKey(FFXIVClientStructs.FFXIV.Client.System.Input.SeVirtualKey.ESCAPE, _config);
                     _lastHaltRecoveryTime = DateTime.UtcNow;
                     _haltRecoveryState = HaltRecoveryState.WaitAfterEscape;
                     return true;
@@ -308,7 +312,7 @@ public class KTGAutomationManager
                     // If buffer is still dirty after 300ms, retry Escape once
                     if ((DateTime.UtcNow - _lastHaltRecoveryTime).TotalMilliseconds > 300)
                     {
-                        KTGInputSimulator.SendKey(FFXIVClientStructs.FFXIV.Client.System.Input.SeVirtualKey.ESCAPE);
+                        KTGInputSimulator.SendKey(FFXIVClientStructs.FFXIV.Client.System.Input.SeVirtualKey.ESCAPE, _config);
                         _lastHaltRecoveryTime = DateTime.UtcNow;
                     }
                     return true;
@@ -335,7 +339,7 @@ public class KTGAutomationManager
         AddonKTGEnemyCastBar.Reset();
         KTGStateReader.ClearCache();
 
-        if ((_config.AutoLeaveResults || _config.AutoLoopEnabled) && IsHumanizedReady("results", _lastActionTime, 1.5f, 2.0f))
+        if (_config.AutoLoopEnabled && IsHumanizedReady("results", _lastActionTime, 1.5f, 2.0f))
         {
             var delay = GetHumanizedDelay("results", 1.5f, 2.0f);
             _log.Information($"[AutoKeyboundBrawler] Auto-closing results screen (waited {delay}ms)...");
@@ -355,7 +359,7 @@ public class KTGAutomationManager
         _haltRecoveryState = HaltRecoveryState.None;
         KTGStateReader.ClearCache();
 
-        if ((_config.AutoConfirmRegister || _config.AutoCommenceDuty || _config.AutoLoopEnabled) && IsHumanizedReady("commence", _lastActionTime, 0.8f, 1.2f))
+        if (_config.AutoLoopEnabled && IsHumanizedReady("commence", _lastActionTime, 0.8f, 1.2f))
         {
             var delay = GetHumanizedDelay("commence", 0.8f, 1.2f);
             _log.Information($"[AutoKeyboundBrawler] Duty popped! Auto-commencing (waited {delay}ms)...");
@@ -396,7 +400,7 @@ public class KTGAutomationManager
         _haltRecoveryState = HaltRecoveryState.None;
         KTGStateReader.ClearCache();
 
-        if ((_config.AutoConfirmRegister || _config.AutoLoopEnabled) && IsHumanizedReady("register", _lastActionTime, 0.5f, 0.9f))
+        if (_config.AutoLoopEnabled && IsHumanizedReady("register", _lastActionTime, 0.5f, 0.9f))
         {
             var delay = GetHumanizedDelay("register", 0.5f, 0.9f);
             _log.Information($"[AutoKeyboundBrawler] Auto-confirming registration (waited {delay}ms)...");
@@ -436,27 +440,35 @@ public class KTGAutomationManager
 
         CurrentStatus = "In Keybound Square";
 
-        // 3. Advance NPC talk dialog if open (with humanized read delay)
-        unsafe
-        {
-            if (ECommons.GenericHelpers.TryGetAddonByName("Talk", out FFXIVClientStructs.FFXIV.Component.GUI.AtkUnitBase* talk) &&
-                talk != null &&
-                talk->IsVisible &&
-                talk->IsReady)
-            {
-                if (IsHumanizedReady("talk", _lastActionTime, 0.3f, 0.6f))
-                {
-                    ECommons.Automation.Callback.Fire(talk, true, 0);
-                    _lastActionTime = DateTime.UtcNow;
-                    ConsumeHumanizedDelay("talk");
-                }
-                return;
-            }
-        }
-
-        if (!_config.AutoTalkRegistrar && !_config.AutoLoopEnabled)
+        // If AFK Loop is not enabled, do not interact with NPCs or advance dialogues in the Square
+        if (!_config.AutoLoopEnabled)
         {
             return;
+        }
+
+        // 3. Advance NPC talk dialog if open (with humanized read delay)
+        try
+        {
+            unsafe
+            {
+                if (ECommons.GenericHelpers.TryGetAddonByName("Talk", out FFXIVClientStructs.FFXIV.Component.GUI.AtkUnitBase* talk) &&
+                    talk != null &&
+                    talk->IsVisible &&
+                    talk->IsReady)
+                {
+                    if (IsHumanizedReady("talk", _lastActionTime, 0.3f, 0.6f))
+                    {
+                        ECommons.Automation.Callback.Fire(talk, true, 0);
+                        _lastActionTime = DateTime.UtcNow;
+                        ConsumeHumanizedDelay("talk");
+                    }
+                    return;
+                }
+            }
+        }
+        catch
+        {
+            // UI or GameGui unavailable
         }
 
         // Humanized throttle for NPC interaction
@@ -465,8 +477,14 @@ public class KTGAutomationManager
             return;
         }
 
-        if (Svc.Condition[Dalamud.Game.ClientState.Conditions.ConditionFlag.OccupiedInEvent] ||
-            Svc.Condition[Dalamud.Game.ClientState.Conditions.ConditionFlag.BetweenAreas])
+        if (Svc.Condition != null && (
+            Svc.Condition[Dalamud.Game.ClientState.Conditions.ConditionFlag.OccupiedInEvent] ||
+            Svc.Condition[Dalamud.Game.ClientState.Conditions.ConditionFlag.BetweenAreas]))
+        {
+            return;
+        }
+
+        if (Svc.Objects == null)
         {
             return;
         }
@@ -487,7 +505,7 @@ public class KTGAutomationManager
         }
 
         // Step 1: Ensure registrar is actively targeted first
-        if (Svc.Targets.Target?.Address != registrar.Address)
+        if (Svc.Targets != null && Svc.Targets.Target?.Address != registrar.Address)
         {
             Svc.Targets.Target = registrar;
             CurrentStatus = "In Keybound Square (Targeting Registrar...)";
@@ -495,14 +513,25 @@ public class KTGAutomationManager
         }
 
         // Step 2: Interact with targeted NPC
-        unsafe
+        try
         {
-            FFXIVClientStructs.FFXIV.Client.Game.Control.TargetSystem.Instance()->InteractWithObject((FFXIVClientStructs.FFXIV.Client.Game.Object.GameObject*)registrar.Address, false);
+            unsafe
+            {
+                var targetSystem = FFXIVClientStructs.FFXIV.Client.Game.Control.TargetSystem.Instance();
+                if (targetSystem != null)
+                {
+                    targetSystem->InteractWithObject((FFXIVClientStructs.FFXIV.Client.Game.Object.GameObject*)registrar.Address, false);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _log?.Verbose(ex, "[AutoKeyboundBrawler] InteractWithObject threw");
         }
 
         var delayInteract = GetHumanizedDelay("npcInteract", 1.0f, 1.5f);
         CurrentStatus = "In Keybound Square (Interacting with Registrar...)";
-        _log.Information($"[AutoKeyboundBrawler] Auto-interacted with Keybound Registrar (waited {delayInteract}ms).");
+        _log?.Information($"[AutoKeyboundBrawler] Auto-interacted with Keybound Registrar (waited {delayInteract}ms).");
         _lastActionTime = DateTime.UtcNow;
         ConsumeHumanizedDelay("npcInteract");
     }

@@ -19,7 +19,7 @@ public sealed class Plugin : IDalamudPlugin
     public const string LongCommandName = "/autokeyboundbrawler";
 
     public static Plugin Instance { get; private set; } = null!;
-    public static Configuration Configuration { get; private set; } = null!;
+    public static Configuration Configuration { get; internal set; } = null!;
 
     public readonly WindowSystem WindowSystem = new("AutoKeyboundBrawler");
     private readonly MainWindow _mainWindow;
@@ -68,18 +68,33 @@ public sealed class Plugin : IDalamudPlugin
         Svc.Log.Information("[AutoKeyboundBrawler] Plugin initialized successfully.");
     }
 
-    private bool _hasTriggeredProximityOpen;
-    private long _lastProximityCheckTick;
+    internal bool _hasTriggeredProximityOpen;
+    internal long _lastProximityCheckTick;
 
     private void OnFrameworkUpdate(IFramework framework)
     {
-        CheckRegistrarProximity();
-        _automation.Tick();
+        try
+        {
+            CheckRegistrarProximity();
+        }
+        catch (Exception ex)
+        {
+            Svc.Log?.Verbose(ex, "[AutoKeyboundBrawler] CheckRegistrarProximity threw");
+        }
+
+        try
+        {
+            _automation.Tick();
+        }
+        catch (Exception ex)
+        {
+            Svc.Log?.Error(ex, "[AutoKeyboundBrawler] Automation tick threw");
+        }
     }
 
-    private void CheckRegistrarProximity()
+    internal void CheckRegistrarProximity()
     {
-        if (!Configuration.AutoOpenNearRegistrar)
+        if (Configuration == null || !Configuration.AutoOpenNearRegistrar)
         {
             return;
         }
@@ -93,9 +108,9 @@ public sealed class Plugin : IDalamudPlugin
         _lastProximityCheckTick = now;
 
         // If in loading screen, disconnected, or between areas, reset trigger
-        if (!Svc.ClientState.IsLoggedIn ||
-            Svc.Objects.LocalPlayer == null ||
-            Svc.Condition[Dalamud.Game.ClientState.Conditions.ConditionFlag.BetweenAreas])
+        if (Svc.ClientState == null || !Svc.ClientState.IsLoggedIn ||
+            Svc.Objects?.LocalPlayer == null ||
+            (Svc.Condition != null && Svc.Condition[Dalamud.Game.ClientState.Conditions.ConditionFlag.BetweenAreas]))
         {
             _hasTriggeredProximityOpen = false;
             return;
@@ -103,37 +118,60 @@ public sealed class Plugin : IDalamudPlugin
 
         // If inside Duty, reset flag so it re-triggers when returning to Square
         if (KTGSafetyGuard.IsInEventDuty ||
-            Svc.Condition[Dalamud.Game.ClientState.Conditions.ConditionFlag.BoundByDuty])
+            (Svc.Condition != null && Svc.Condition[Dalamud.Game.ClientState.Conditions.ConditionFlag.BoundByDuty]))
         {
             _hasTriggeredProximityOpen = false;
             return;
         }
 
-        var registrar = KTGLocalizationRegistry.FindNearbyRegistrar(12.0f, out var dist);
-        if (registrar != null)
+        try
         {
-            if (dist <= 7.0f)
+            var registrar = KTGLocalizationRegistry.FindNearbyRegistrar(12.0f, out var dist);
+            if (registrar != null)
             {
-                if (!_hasTriggeredProximityOpen)
+                if (UpdateProximityState(ref _hasTriggeredProximityOpen, dist, _mainWindow?.IsOpen ?? false, out var shouldOpen))
                 {
-                    _hasTriggeredProximityOpen = true;
-                    if (!_mainWindow.IsOpen)
+                    if (_mainWindow != null && shouldOpen)
                     {
                         _mainWindow.IsOpen = true;
-                        Svc.Log.Information($"[AutoKeyboundBrawler] Keybound Registrar in interaction range ({dist:F1}y). Auto-opened interface.");
+                        Svc.Log?.Information($"[AutoKeyboundBrawler] Keybound Registrar in interaction range ({dist:F1}y). Auto-opened interface.");
                     }
                 }
             }
-            else if (dist > 9.5f)
+            else
             {
-                // Hysteresis: reset trigger once player walks away
                 _hasTriggeredProximityOpen = false;
             }
         }
-        else
+        catch (Exception ex)
         {
+            Svc.Log?.Verbose(ex, "[AutoKeyboundBrawler] CheckRegistrarProximity search failed");
             _hasTriggeredProximityOpen = false;
         }
+    }
+
+    internal static bool UpdateProximityState(ref bool hasTriggered, float distance, bool isCurrentlyOpen, out bool shouldOpen)
+    {
+        shouldOpen = false;
+        if (distance <= 7.0f)
+        {
+            if (!hasTriggered)
+            {
+                hasTriggered = true;
+                if (!isCurrentlyOpen)
+                {
+                    shouldOpen = true;
+                    return true;
+                }
+            }
+        }
+        else if (distance > 9.5f)
+        {
+            // Hysteresis: reset trigger once player walks away
+            hasTriggered = false;
+        }
+
+        return false;
     }
 
     public void OpenUI()

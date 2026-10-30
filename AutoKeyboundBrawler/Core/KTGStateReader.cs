@@ -69,14 +69,15 @@ public static unsafe class KTGStateReader
         }
 
         // 2. Check Dalamud Condition flags
-        if (Svc.Condition[ConditionFlag.InDutyQueue] ||
+        if (Svc.Condition != null && (
+            Svc.Condition[ConditionFlag.InDutyQueue] ||
             Svc.Condition[ConditionFlag.WaitingForDuty] ||
             Svc.Condition[ConditionFlag.WaitingForDutyFinder] ||
             Svc.Condition[ConditionFlag.WaitingForRaceOrMatch] ||
             Svc.Condition[ConditionFlag.RegisteringForRaceOrMatch] ||
             Svc.Condition[ConditionFlag.WaitingForTripleTriadMatch] ||
             Svc.Condition[ConditionFlag.WaitingForTripleTriadMatch83] ||
-            Svc.Condition[ConditionFlag.RegisteringForTripleTriadMatch])
+            Svc.Condition[ConditionFlag.RegisteringForTripleTriadMatch]))
         {
             return true;
         }
@@ -114,6 +115,19 @@ public static unsafe class KTGStateReader
         if (KTGSafetyGuard.IsInKeyboundSquare)
         {
             return EventPhase.InSquare;
+        }
+
+        // If outside duty and near registrar, allow square automation to operate
+        try
+        {
+            if (KTGLocalizationRegistry.FindNearbyRegistrar(12.0f, out _) != null)
+            {
+                return EventPhase.InSquare;
+            }
+        }
+        catch
+        {
+            // Objects unavailable
         }
 
         return EventPhase.None;
