@@ -14,7 +14,7 @@ public static class Loc
                 return Plugin.Configuration.SelectedLanguage.Value;
             }
 
-            var gameLang = Svc.ClientState.ClientLanguage;
+            var gameLang = Svc.ClientState?.ClientLanguage;
             return gameLang switch
             {
                 ClientLanguage.Japanese => ClientLanguage.Japanese,
@@ -179,6 +179,14 @@ public static class Loc
             ("LangAuto", ClientLanguage.German) => "Automatisch (Spiel-Sprache)",
             ("LangAuto", ClientLanguage.French) => "Automatique (Langue du jeu)",
             ("LangAuto", _) => "Auto (Game Client)",
+
+            // --- Currency ---
+            ("MGC", _) => "MGC",
+
+            ("MgcTooltip", ClientLanguage.Japanese) => "マンダヴィル・ゴールドソーサークレジット (MGC)",
+            ("MgcTooltip", ClientLanguage.German) => "Manderville-Gold-Saucer-Credits (MGC)",
+            ("MgcTooltip", ClientLanguage.French) => "Crédits du Gold Saucer Manderville (MGC)",
+            ("MgcTooltip", _) => "Manderville Gold Saucer Credits (MGC)",
 
             _ => key
         };

@@ -85,15 +85,50 @@ internal static class HeaderBar
         dl.AddCircleFilled(dotCenter, dotRadius, Paint.Col(dotColor));
         textLeft = dotCenter.X + dotRadius + 6f * scale;
 
-        // Status pill
+        // Header pills (Status badge + MGC currency counter)
         var rightButtonsLeft = end.X - padX - (ButtonSize * 2f + LangButtonW + ButtonGap * 2f) * scale;
-        DrawStatusPill(dl, automation, textLeft, rightButtonsLeft, midY, compact);
+        DrawHeaderPills(dl, automation, textLeft, rightButtonsLeft, midY, compact);
 
         // Window buttons (Compact, Language & Close)
         DrawButtons(window, end, midY, compact);
     }
 
-    private static void DrawStatusPill(ImDrawListPtr dl, KTGAutomationManager automation, float leftX, float rightLimit, float midY, bool compact)
+    internal static bool ComputePillPositions(
+        float leftLimit,
+        float rightLimit,
+        float statusPillW,
+        float mgcPillW,
+        float gap,
+        out float statusPillLeft,
+        out float mgcPillLeft,
+        out bool mgcVisible)
+    {
+        mgcPillLeft = leftLimit;
+        statusPillLeft = rightLimit - statusPillW;
+
+        if (statusPillLeft < leftLimit)
+        {
+            mgcVisible = false;
+            return false;
+        }
+
+        mgcVisible = mgcPillLeft + mgcPillW + gap <= statusPillLeft;
+        return true;
+    }
+
+    internal static bool ComputeActiveWordPosition(
+        float leftBoundary,
+        float rightAnchorLeft,
+        float wordWidth,
+        float margin,
+        out float wordLeft)
+    {
+        var wordRight = rightAnchorLeft - margin;
+        wordLeft = wordRight - wordWidth;
+        return wordLeft > leftBoundary;
+    }
+
+    private static void DrawHeaderPills(ImDrawListPtr dl, KTGAutomationManager automation, float leftX, float rightLimit, float midY, bool compact)
     {
         var scale = ImGuiHelpers.GlobalScale;
         var isTyping = automation.IsTyping;
@@ -101,6 +136,7 @@ internal static class HeaderBar
         var isDuty = automation.IsInDutyPhase;
         var isQueue = automation.IsInQueuePhase;
 
+        // 1. Prepare Status Badge
         var badgeText = isHalt ? Loc.Get("BadgeHalt") :
                         isTyping ? Loc.Get("BadgeTyping") :
                         isDuty ? Loc.Get("BadgeCombat") :
@@ -113,34 +149,67 @@ internal static class HeaderBar
                          isQueue ? FF7RTheme.AtbGold :
                          FF7RTheme.TextMuted;
 
-        var textSize = ImGui.CalcTextSize(badgeText);
-        var pillW = textSize.X + 12f * scale;
+        var statusTextSize = ImGui.CalcTextSize(badgeText);
+        var statusPillW = statusTextSize.X + 12f * scale;
         var pillH = 16f * scale;
 
-        // Position pill before window control buttons
-        var pillRight = rightLimit - 4f * scale;
-        var pillLeft = pillRight - pillW;
+        // 2. Prepare MGC Currency Pill
+        var (mgcCount, mgcMax) = KTGCurrencyReader.GetMGC();
+        var mgcText = KTGCurrencyReader.FormatDisplay(mgcCount);
+        var mgcTextSize = ImGui.CalcTextSize(mgcText);
+        var mgcPillW = mgcTextSize.X + 12f * scale;
 
-        if (pillLeft < leftX) return; // Don't overlap title
+        var gap = 4f * scale;
+        var rightMargin = rightLimit - 4f * scale;
 
-        var pillMin = new Vector2(pillLeft, midY - pillH * 0.5f);
-        var pillMax = new Vector2(pillRight, midY + pillH * 0.5f);
+        if (!ComputePillPositions(leftX, rightMargin, statusPillW, mgcPillW, gap,
+            out var statusPillLeft, out var mgcPillLeft, out var mgcVisible))
+        {
+            return; // Can't fit pills without overlapping title
+        }
 
-        // Draw compact badge
-        Paint.Fill(dl, pillMin, pillMax, FF7RTheme.WithAlpha(badgeColor, 0.12f), 3f * scale);
-        Paint.Stroke(dl, pillMin, pillMax, FF7RTheme.WithAlpha(badgeColor, 0.55f), 3f * scale);
+        // 3. Draw MGC Pill on the left side (immediately after AKB title and status dot)
+        if (mgcVisible)
+        {
+            var mgcMin = new Vector2(mgcPillLeft, midY - pillH * 0.5f);
+            var mgcMaxBox = new Vector2(mgcPillLeft + mgcPillW, midY + pillH * 0.5f);
 
-        var textPos = pillMin + (new Vector2(pillW, pillH) - textSize) * 0.5f;
-        dl.AddText(textPos, Paint.Col(badgeColor), badgeText);
+            var isHovered = Hit.HoveringRect(mgcMin, mgcMaxBox);
+            if (isHovered && !ImGui.IsAnyItemActive())
+            {
+                ImGui.SetMouseCursor(ImGuiMouseCursor.Hand);
+                var tooltipStr = KTGCurrencyReader.FormatTooltip(Loc.Get("MgcTooltip"), mgcCount, mgcMax);
+                ImGui.SetTooltip(tooltipStr);
+            }
 
-        // If in compact mode and typing, also show the active word
+            var mgcBgAlpha = isHovered ? 0.22f : 0.12f;
+            var mgcBorderAlpha = isHovered ? 0.85f : 0.55f;
+            var mgcTextColor = isHovered ? FF7RTheme.AtbGoldSoft : FF7RTheme.AtbGold;
+
+            Paint.Fill(dl, mgcMin, mgcMaxBox, FF7RTheme.WithAlpha(FF7RTheme.AtbGold, mgcBgAlpha), 3f * scale);
+            Paint.Stroke(dl, mgcMin, mgcMaxBox, FF7RTheme.WithAlpha(FF7RTheme.AtbGold, mgcBorderAlpha), 3f * scale);
+
+            var mgcTextPos = mgcMin + (new Vector2(mgcPillW, pillH) - mgcTextSize) * 0.5f;
+            dl.AddText(mgcTextPos, Paint.Col(mgcTextColor), mgcText);
+        }
+
+        // 4. Draw Status Pill on the right side (before window control buttons)
+        var statusMin = new Vector2(statusPillLeft, midY - pillH * 0.5f);
+        var statusMax = new Vector2(statusPillLeft + statusPillW, midY + pillH * 0.5f);
+
+        Paint.Fill(dl, statusMin, statusMax, FF7RTheme.WithAlpha(badgeColor, 0.12f), 3f * scale);
+        Paint.Stroke(dl, statusMin, statusMax, FF7RTheme.WithAlpha(badgeColor, 0.55f), 3f * scale);
+
+        var statusTextPos = statusMin + (new Vector2(statusPillW, pillH) - statusTextSize) * 0.5f;
+        dl.AddText(statusTextPos, Paint.Col(badgeColor), badgeText);
+
+        // 5. If in compact mode and typing, also show the active word
         if (compact && isTyping && !string.IsNullOrEmpty(automation.ActiveWord))
         {
             var wordText = $"\"{automation.ActiveWord}\"";
             var wordSize = ImGui.CalcTextSize(wordText);
-            var wordRight = pillMin.X - 6f * scale;
-            var wordLeft = wordRight - wordSize.X;
-            if (wordLeft > leftX)
+            var leftBoundary = mgcVisible ? (mgcPillLeft + mgcPillW + 6f * scale) : leftX;
+            if (ComputeActiveWordPosition(leftBoundary, statusPillLeft, wordSize.X, 6f * scale, out var wordLeft))
             {
                 dl.AddText(new Vector2(wordLeft, midY - wordSize.Y * 0.5f), Paint.Col(FF7RTheme.MakoCyan), wordText);
             }

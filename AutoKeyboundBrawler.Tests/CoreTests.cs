@@ -1,6 +1,7 @@
 using AutoKeyboundBrawler.Core;
 using AutoKeyboundBrawler.Data;
 using AutoKeyboundBrawler.Interop;
+using AutoKeyboundBrawler.UI;
 using System;
 using System.Collections.Generic;
 using Xunit;
@@ -1059,6 +1060,270 @@ public class CoreTests
         Assert.True(didOpen);
         Assert.True(shouldOpen);
         Assert.True(hasTriggered);
+    }
+
+    [Fact]
+    public void TestKTGCurrencyReader_ConstantsAndDefaults()
+    {
+        Assert.Equal(52322u, KTGCurrencyReader.MgcItemId);
+        Assert.Equal(10000u, KTGCurrencyReader.DefaultMaxCount);
+
+        KTGCurrencyReader.ResetCacheForTesting();
+        KTGCurrencyReader.SetOverridesForTesting(null, null);
+
+        var (count, max) = KTGCurrencyReader.GetMGC();
+        Assert.Equal(10000u, max);
+    }
+
+    [Fact]
+    public void TestKTGCurrencyReader_Overrides()
+    {
+        try
+        {
+            KTGCurrencyReader.SetOverridesForTesting(2327, 10000);
+            var (count, max) = KTGCurrencyReader.GetMGC();
+            Assert.Equal(2327u, count);
+            Assert.Equal(10000u, max);
+            Assert.Equal(2327u, KTGCurrencyReader.CurrentCount);
+            Assert.Equal(10000u, KTGCurrencyReader.MaxCount);
+
+            // Null max should fallback to DefaultMaxCount
+            KTGCurrencyReader.SetOverridesForTesting(750, null);
+            var (c2, m2) = KTGCurrencyReader.GetMGC();
+            Assert.Equal(750u, c2);
+            Assert.Equal(10000u, m2);
+        }
+        finally
+        {
+            KTGCurrencyReader.SetOverridesForTesting(null, null);
+            KTGCurrencyReader.ResetCacheForTesting();
+        }
+    }
+
+    [Fact]
+    public void TestKTGCurrencyReader_Formatting()
+    {
+        Assert.Equal("0 MGC", KTGCurrencyReader.FormatDisplay(0));
+        var disp = KTGCurrencyReader.FormatDisplay(2327);
+        Assert.EndsWith(" MGC", disp);
+        Assert.Contains("2", disp);
+        Assert.Contains("327", disp);
+
+        var tooltip = KTGCurrencyReader.FormatTooltip("Manderville Gold Saucer Credits (MGC)", 2327, 10000);
+        Assert.StartsWith("Manderville Gold Saucer Credits (MGC): ", tooltip);
+        Assert.Contains("2", tooltip);
+        Assert.Contains("327", tooltip);
+        Assert.Contains("10", tooltip);
+    }
+
+    [Fact]
+    public void TestHeaderBar_ComputePillPositions_WideLayout()
+    {
+        // Plenty of room for both pills: MGC on left, status on right
+        var fits = UI.Components.HeaderBar.ComputePillPositions(
+            leftLimit: 40f,
+            rightLimit: 240f,
+            statusPillW: 36f,
+            mgcPillW: 64f,
+            gap: 4f,
+            out var statusLeft,
+            out var mgcLeft,
+            out var mgcVisible);
+
+        Assert.True(fits);
+        Assert.True(mgcVisible);
+        Assert.Equal(40f, mgcLeft);    // Placed at leftLimit on left side
+        Assert.Equal(204f, statusLeft); // Placed at rightLimit - statusPillW
+        Assert.True(mgcLeft + 64f + 4f <= statusLeft);
+    }
+
+    [Fact]
+    public void TestHeaderBar_ComputePillPositions_NarrowLayout_MgcDropped()
+    {
+        // Status fits on right, but MGC on left collides with status
+        // 150 + 64 + 4 = 218 > 204
+        var fits = UI.Components.HeaderBar.ComputePillPositions(
+            leftLimit: 150f,
+            rightLimit: 240f,
+            statusPillW: 36f,
+            mgcPillW: 64f,
+            gap: 4f,
+            out var statusLeft,
+            out var mgcLeft,
+            out var mgcVisible);
+
+        Assert.True(fits);
+        Assert.False(mgcVisible);
+        Assert.Equal(204f, statusLeft);
+        Assert.Equal(150f, mgcLeft);
+    }
+
+    [Fact]
+    public void TestHeaderBar_ComputePillPositions_ExtremeNarrow_StatusCannotFit()
+    {
+        // Status pill cannot even fit before leftLimit (240 - 36 = 204 < 210)
+        var fits = UI.Components.HeaderBar.ComputePillPositions(
+            leftLimit: 210f,
+            rightLimit: 240f,
+            statusPillW: 36f,
+            mgcPillW: 64f,
+            gap: 4f,
+            out var statusLeft,
+            out var mgcLeft,
+            out var mgcVisible);
+
+        Assert.False(fits);
+        Assert.False(mgcVisible);
+    }
+
+    [Fact]
+    public void TestHeaderBar_ComputePillPositions_ExactBoundaries()
+    {
+        // 1. mgcPillLeft + mgcPillW + gap == statusPillLeft exactly
+        // statusPillW: 30, rightLimit: 100 => statusPillLeft = 70.
+        // leftLimit: 40, mgcPillW: 20, gap: 10 => 40 + 20 + 10 = 70.
+        var fits = UI.Components.HeaderBar.ComputePillPositions(
+            leftLimit: 40f,
+            rightLimit: 100f,
+            statusPillW: 30f,
+            mgcPillW: 20f,
+            gap: 10f,
+            out var statusLeft,
+            out var mgcLeft,
+            out var mgcVisible);
+
+        Assert.True(fits);
+        Assert.True(mgcVisible);
+        Assert.Equal(40f, mgcLeft);
+        Assert.Equal(70f, statusLeft);
+
+        // 2. Just 0.1f beyond boundary (gap: 10.1f => 40 + 20 + 10.1 = 70.1 > 70)
+        fits = UI.Components.HeaderBar.ComputePillPositions(
+            leftLimit: 40f,
+            rightLimit: 100f,
+            statusPillW: 30f,
+            mgcPillW: 20f,
+            gap: 10.1f,
+            out statusLeft,
+            out mgcLeft,
+            out mgcVisible);
+
+        Assert.True(fits);
+        Assert.False(mgcVisible);
+        Assert.Equal(70f, statusLeft);
+
+        // 3. statusPillLeft == leftLimit exactly (70f)
+        fits = UI.Components.HeaderBar.ComputePillPositions(
+            leftLimit: 70f,
+            rightLimit: 100f,
+            statusPillW: 30f,
+            mgcPillW: 20f,
+            gap: 10f,
+            out statusLeft,
+            out mgcLeft,
+            out mgcVisible);
+
+        Assert.True(fits);
+        Assert.False(mgcVisible); // 70 + 20 + 10 = 100 > 70
+        Assert.Equal(70f, statusLeft);
+
+        // 4. statusPillLeft just 0.1f below leftLimit (70.1f)
+        fits = UI.Components.HeaderBar.ComputePillPositions(
+            leftLimit: 70.1f,
+            rightLimit: 100f,
+            statusPillW: 30f,
+            mgcPillW: 20f,
+            gap: 10f,
+            out statusLeft,
+            out mgcLeft,
+            out mgcVisible);
+
+        Assert.False(fits);
+        Assert.False(mgcVisible);
+    }
+
+    [Fact]
+    public void TestHeaderBar_ComputeActiveWordPosition()
+    {
+        // Left boundary at 100 (e.g. MGC pill right edge + margin)
+        // Status pill on the right at 200
+        // Margin: 6
+        // Word width: 50
+        // Word right: 200 - 6 = 194
+        // Word left: 194 - 50 = 144
+        // 144 > 100 => fits!
+        var fits = UI.Components.HeaderBar.ComputeActiveWordPosition(
+            leftBoundary: 100f,
+            rightAnchorLeft: 200f,
+            wordWidth: 50f,
+            margin: 6f,
+            out var wordLeft);
+
+        Assert.True(fits);
+        Assert.Equal(144f, wordLeft);
+
+        // Word too wide: 100f width
+        // Word left: 194 - 100 = 94 <= 100 => does not fit!
+        fits = UI.Components.HeaderBar.ComputeActiveWordPosition(
+            leftBoundary: 100f,
+            rightAnchorLeft: 200f,
+            wordWidth: 100f,
+            margin: 6f,
+            out wordLeft);
+
+        Assert.False(fits);
+    }
+
+    [Fact]
+    public void TestLoc_MgcLocalization()
+    {
+        var originalConfig = Plugin.Configuration;
+        try
+        {
+            Plugin.Configuration = new Configuration();
+
+            // Key MGC
+            Assert.Equal("MGC", Loc.Get("MGC"));
+
+            // Japanese
+            Plugin.Configuration.SelectedLanguage = Dalamud.Game.ClientLanguage.Japanese;
+            Assert.Equal("マンダヴィル・ゴールドソーサークレジット (MGC)", Loc.Get("MgcTooltip"));
+
+            // German
+            Plugin.Configuration.SelectedLanguage = Dalamud.Game.ClientLanguage.German;
+            Assert.Equal("Manderville-Gold-Saucer-Credits (MGC)", Loc.Get("MgcTooltip"));
+
+            // French
+            Plugin.Configuration.SelectedLanguage = Dalamud.Game.ClientLanguage.French;
+            Assert.Equal("Crédits du Gold Saucer Manderville (MGC)", Loc.Get("MgcTooltip"));
+
+            // English
+            Plugin.Configuration.SelectedLanguage = Dalamud.Game.ClientLanguage.English;
+            Assert.Equal("Manderville Gold Saucer Credits (MGC)", Loc.Get("MgcTooltip"));
+        }
+        finally
+        {
+            Plugin.Configuration = originalConfig!;
+        }
+    }
+
+    [Fact]
+    public void TestCurrencyManager_Contract()
+    {
+        var type = typeof(FFXIVClientStructs.FFXIV.Client.Game.CurrencyManager);
+        Assert.NotNull(type.GetMethod("Instance"));
+
+        var getItemCount = type.GetMethod("GetItemCount");
+        Assert.NotNull(getItemCount);
+        Assert.Equal(typeof(uint), getItemCount.ReturnType);
+        var p1 = Assert.Single(getItemCount.GetParameters());
+        Assert.Equal(typeof(uint), p1.ParameterType);
+
+        var getItemMaxCount = type.GetMethod("GetItemMaxCount");
+        Assert.NotNull(getItemMaxCount);
+        Assert.Equal(typeof(uint), getItemMaxCount.ReturnType);
+        var p2 = Assert.Single(getItemMaxCount.GetParameters());
+        Assert.Equal(typeof(uint), p2.ParameterType);
     }
 }
 
