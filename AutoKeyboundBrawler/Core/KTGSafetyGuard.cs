@@ -8,11 +8,21 @@ public static class KTGSafetyGuard
     public const uint DutyTerritoryId = 1359;
     public const uint SquareTerritoryId = 1360;
 
-    public static bool IsInEventDuty => Svc.ClientState.TerritoryType == DutyTerritoryId;
-    public static bool IsInKeyboundSquare => Svc.ClientState.TerritoryType == SquareTerritoryId;
+    private static bool? _inEventDutyOverride;
+    private static bool? _inKeyboundSquareOverride;
+
+    internal static void SetTerritoryOverridesForTesting(bool? inDuty, bool? inSquare)
+    {
+        _inEventDutyOverride = inDuty;
+        _inKeyboundSquareOverride = inSquare;
+    }
+
+    public static bool IsInEventDuty => _inEventDutyOverride ?? (Svc.ClientState != null && Svc.ClientState.TerritoryType == DutyTerritoryId);
+    public static bool IsInKeyboundSquare => _inKeyboundSquareOverride ?? (Svc.ClientState != null && Svc.ClientState.TerritoryType == SquareTerritoryId);
 
     public static unsafe bool IsPlayerStunned()
     {
+        if (Svc.Objects == null) return false;
         var localPlayer = Svc.Objects.LocalPlayer;
         if (localPlayer == null) return false;
 
@@ -41,6 +51,12 @@ public static class KTGSafetyGuard
         if (!IsInEventDuty)
         {
             reason = "Not in Keybound Brawler duty";
+            return false;
+        }
+
+        if (config.RequireWindowFocus && !NativeMethods.IsGameFocused())
+        {
+            reason = "Game window is not focused";
             return false;
         }
 

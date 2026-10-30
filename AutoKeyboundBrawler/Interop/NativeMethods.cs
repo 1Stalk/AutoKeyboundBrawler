@@ -83,4 +83,75 @@ internal static unsafe class NativeMethods
 
     [DllImport("user32.dll", CharSet = CharSet.Auto)]
     public static extern IntPtr SendMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+
+    [DllImport("user32.dll")]
+    public static extern short GetAsyncKeyState(int vKey);
+
+    private static bool? _gameFocusedOverride;
+    private static bool? _shiftPressedOverride;
+
+    internal static void SetGameFocusedOverrideForTesting(bool? isFocused)
+    {
+        _gameFocusedOverride = isFocused;
+    }
+
+    internal static void SetShiftPressedOverrideForTesting(bool? isPressed)
+    {
+        _shiftPressedOverride = isPressed;
+    }
+
+    /// <summary>
+    /// Checks whether the FFXIV game window currently has foreground input focus.
+    /// Returns false when the player is switched into Discord, web browser, or another external window.
+    /// </summary>
+    public static bool IsGameFocused()
+    {
+        if (_gameFocusedOverride.HasValue)
+        {
+            return _gameFocusedOverride.Value;
+        }
+
+        try
+        {
+            var foreground = GetForegroundWindow();
+            if (foreground == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            GetWindowThreadProcessId(foreground, out var pid);
+            return pid == (uint)Environment.ProcessId;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Checks whether the Shift key is currently held down physically by the user.
+    /// Prevents synthetic Shift KeyUp events from resetting the user's physical Shift hold.
+    /// </summary>
+    public static bool IsShiftPressed()
+    {
+        if (_shiftPressedOverride.HasValue)
+        {
+            return _shiftPressedOverride.Value;
+        }
+
+        try
+        {
+            return (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
+        }
+        catch
+        {
+            return false;
+        }
+    }
 }

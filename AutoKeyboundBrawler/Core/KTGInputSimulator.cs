@@ -123,6 +123,11 @@ public unsafe class KTGInputSimulator
             return;
         }
 
+        if (config.RequireWindowFocus && !NativeMethods.IsGameFocused())
+        {
+            return;
+        }
+
         if (_stepStopwatch.ElapsedMilliseconds < _nextDelayMs)
         {
             return;
@@ -186,6 +191,12 @@ public unsafe class KTGInputSimulator
     /// </summary>
     public static bool TryClearInputBuffer()
     {
+        // 0. NEVER send keys if the game window is not focused!
+        if (!NativeMethods.IsGameFocused())
+        {
+            return false;
+        }
+
         // 1. NEVER send Escape if the input buffer is already empty!
         // Pressing Escape on an empty text input in FFXIV cancels target and opens the Exit Duty / System Menu!
         if (AddonKTGInput.IsInputEmpty())
@@ -227,6 +238,11 @@ public unsafe class KTGInputSimulator
 
     public static void SendKey(SeVirtualKey key)
     {
+        if (!NativeMethods.IsGameFocused())
+        {
+            return;
+        }
+
         try
         {
             var manager = InputDeviceManager.Instance();
@@ -253,7 +269,46 @@ public unsafe class KTGInputSimulator
 
     public static void SendKeyWithShift(SeVirtualKey key)
     {
+        if (!NativeMethods.IsGameFocused())
+        {
+            return;
+        }
+
         var vk = (ushort)key;
+        var physicalShiftDown = NativeMethods.IsShiftPressed();
+
+        if (physicalShiftDown)
+        {
+            // Player is already physically holding Shift.
+            // Only send the key press/release and DO NOT send Shift Up,
+            // which would break the player's physical Shift hold!
+            try
+            {
+                var inputs = stackalloc NativeMethods.INPUT[2];
+                inputs[0] = new NativeMethods.INPUT
+                {
+                    type = NativeMethods.INPUT_KEYBOARD,
+                    u = new NativeMethods.InputUnion { ki = new NativeMethods.KEYBDINPUT { wVk = vk, dwFlags = 0 } }
+                };
+                inputs[1] = new NativeMethods.INPUT
+                {
+                    type = NativeMethods.INPUT_KEYBOARD,
+                    u = new NativeMethods.InputUnion { ki = new NativeMethods.KEYBDINPUT { wVk = vk, dwFlags = NativeMethods.KEYEVENTF_KEYUP } }
+                };
+
+                if (NativeMethods.SendInput(2, inputs, sizeof(NativeMethods.INPUT)) > 0)
+                {
+                    return;
+                }
+            }
+            catch
+            {
+            }
+
+            NativeMethods.keybd_event((byte)vk, 0, 0, 0);
+            NativeMethods.keybd_event((byte)vk, 0, NativeMethods.KEYEVENTF_KEYUP, 0);
+            return;
+        }
 
         try
         {
@@ -301,6 +356,11 @@ public unsafe class KTGInputSimulator
 
     public static void SendUnicodeChar(char c)
     {
+        if (!NativeMethods.IsGameFocused())
+        {
+            return;
+        }
+
         try
         {
             KeyboardDevice.ProcessKeyboardInputMessage(IntPtr.Zero, NativeMethods.WM_CHAR, (IntPtr)c, IntPtr.Zero);

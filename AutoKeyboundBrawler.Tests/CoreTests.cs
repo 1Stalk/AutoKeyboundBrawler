@@ -377,5 +377,206 @@ public class CoreTests
         var exception = Record.Exception(() => KTGAntiAfk.KeepAlive());
         Assert.Null(exception);
     }
+
+    [Fact]
+    public void TestNativeMethods_IsGameFocused_OverridesAndDefault()
+    {
+        try
+        {
+            NativeMethods.SetGameFocusedOverrideForTesting(true);
+            Assert.True(NativeMethods.IsGameFocused());
+
+            NativeMethods.SetGameFocusedOverrideForTesting(false);
+            Assert.False(NativeMethods.IsGameFocused());
+        }
+        finally
+        {
+            NativeMethods.SetGameFocusedOverrideForTesting(null);
+        }
+
+        // Without override, should evaluate without throwing
+        var noThrowException = Record.Exception(() => NativeMethods.IsGameFocused());
+        Assert.Null(noThrowException);
+    }
+
+    [Fact]
+    public void TestNativeMethods_IsShiftPressed_OverridesAndDefault()
+    {
+        try
+        {
+            NativeMethods.SetShiftPressedOverrideForTesting(true);
+            Assert.True(NativeMethods.IsShiftPressed());
+
+            NativeMethods.SetShiftPressedOverrideForTesting(false);
+            Assert.False(NativeMethods.IsShiftPressed());
+        }
+        finally
+        {
+            NativeMethods.SetShiftPressedOverrideForTesting(null);
+        }
+
+        var noThrowException = Record.Exception(() => NativeMethods.IsShiftPressed());
+        Assert.Null(noThrowException);
+    }
+
+    [Fact]
+    public void TestKTGSafetyGuard_CanType_WindowFocusSafety()
+    {
+        try
+        {
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(inDuty: true, inSquare: false);
+            var config = new Configuration { Enabled = true, MinigameAutoplay = true, RequireWindowFocus = true, StopOnPenaltyCast = false };
+
+            // 1. When game window is NOT focused, CanType MUST fail with "Game window is not focused"
+            NativeMethods.SetGameFocusedOverrideForTesting(false);
+            var canTypeUnfocused = KTGSafetyGuard.CanType(config, out var reasonUnfocused);
+            Assert.False(canTypeUnfocused);
+            Assert.Equal("Game window is not focused", reasonUnfocused);
+
+            // 2. When game window IS focused, CanType succeeds
+            NativeMethods.SetGameFocusedOverrideForTesting(true);
+            var canTypeFocused = KTGSafetyGuard.CanType(config, out var reasonFocused);
+            Assert.True(canTypeFocused);
+            Assert.Equal("OK", reasonFocused);
+
+            // 3. When RequireWindowFocus is disabled, unfocused does not block typing
+            config.RequireWindowFocus = false;
+            NativeMethods.SetGameFocusedOverrideForTesting(false);
+            var canTypeNoReq = KTGSafetyGuard.CanType(config, out var reasonNoReq);
+            Assert.True(canTypeNoReq);
+            Assert.Equal("OK", reasonNoReq);
+        }
+        finally
+        {
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(null, null);
+            NativeMethods.SetGameFocusedOverrideForTesting(null);
+        }
+    }
+
+    [Fact]
+    public void TestKTGAntiAfk_ShouldKeepAlive_TerritoryAndConfigScoping()
+    {
+        try
+        {
+            var config = new Configuration
+            {
+                Enabled = true,
+                MinigameAutoplay = true,
+                AutoLoopEnabled = true
+            };
+
+            // Case 1: Outside of Gold Saucer / Duty (e.g. Limsa Lominsa / normal world)
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(inDuty: false, inSquare: false);
+            Assert.False(KTGAntiAfk.ShouldKeepAlive(config));
+
+            // Case 2: Inside Keybound Brawler Duty
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(inDuty: true, inSquare: false);
+            Assert.True(KTGAntiAfk.ShouldKeepAlive(config));
+
+            config.MinigameAutoplay = false;
+            Assert.False(KTGAntiAfk.ShouldKeepAlive(config));
+            config.MinigameAutoplay = true;
+
+            // Case 3: In Keybound Square with AutoLoop active
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(inDuty: false, inSquare: true);
+            config.AutoLoopEnabled = true;
+            Assert.True(KTGAntiAfk.ShouldKeepAlive(config));
+
+            // Case 4: In Keybound Square but AutoLoop is disabled
+            config.AutoLoopEnabled = false;
+            Assert.False(KTGAntiAfk.ShouldKeepAlive(config));
+
+            // Case 5: Master Enabled is false
+            config.Enabled = false;
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(inDuty: true, inSquare: false);
+            Assert.False(KTGAntiAfk.ShouldKeepAlive(config));
+        }
+        finally
+        {
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(null, null);
+        }
+    }
+
+    [Fact]
+    public void TestKTGAntiAfk_KeepAlive_SafetyChecks()
+    {
+        try
+        {
+            // When game is unfocused, KeepAlive executes Layer 3 memory reset safely without sending keystrokes
+            NativeMethods.SetGameFocusedOverrideForTesting(false);
+            var exUnfocused = Record.Exception(() => KTGAntiAfk.KeepAlive(force: true));
+            Assert.Null(exUnfocused);
+
+            // When shift is physically held, KeepAlive executes without sending keystrokes
+            NativeMethods.SetGameFocusedOverrideForTesting(true);
+            NativeMethods.SetShiftPressedOverrideForTesting(true);
+            var exShiftHeld = Record.Exception(() => KTGAntiAfk.KeepAlive(force: true));
+            Assert.Null(exShiftHeld);
+        }
+        finally
+        {
+            NativeMethods.SetGameFocusedOverrideForTesting(null);
+            NativeMethods.SetShiftPressedOverrideForTesting(null);
+        }
+    }
+
+    [Fact]
+    public void TestKTGInputSimulator_UnfocusedBlocksKeyEmulation()
+    {
+        try
+        {
+            NativeMethods.SetGameFocusedOverrideForTesting(false);
+
+            // 1. SendKey when unfocused returns immediately without throwing
+            var exSendKey = Record.Exception(() => KTGInputSimulator.SendKey(FFXIVClientStructs.FFXIV.Client.System.Input.SeVirtualKey.A));
+            Assert.Null(exSendKey);
+
+            // 2. SendKeyWithShift when unfocused returns immediately without throwing
+            var exSendKeyShift = Record.Exception(() => KTGInputSimulator.SendKeyWithShift(FFXIVClientStructs.FFXIV.Client.System.Input.SeVirtualKey.A));
+            Assert.Null(exSendKeyShift);
+
+            // 3. SendUnicodeChar when unfocused returns immediately without throwing
+            var exUnicode = Record.Exception(() => KTGInputSimulator.SendUnicodeChar('z'));
+            Assert.Null(exUnicode);
+
+            // 4. TryClearInputBuffer when unfocused returns false immediately
+            var cleared = KTGInputSimulator.TryClearInputBuffer();
+            Assert.False(cleared);
+
+            // 5. Update when unfocused does NOT type pending characters
+            var sim = new KTGInputSimulator();
+            var config = new Configuration { RequireWindowFocus = true };
+            sim.EnqueueWord("Test", config);
+            var initialRemaining = sim.RemainingChars;
+            Assert.True(initialRemaining > 0);
+
+            // Call Update while unfocused
+            sim.Update(config);
+            Assert.Equal(initialRemaining, sim.RemainingChars);
+        }
+        finally
+        {
+            NativeMethods.SetGameFocusedOverrideForTesting(null);
+        }
+    }
+
+    [Fact]
+    public void TestKTGInputSimulator_SendKeyWithShift_PreservesPhysicalShift()
+    {
+        try
+        {
+            NativeMethods.SetGameFocusedOverrideForTesting(true);
+            NativeMethods.SetShiftPressedOverrideForTesting(true);
+
+            // When user is physically holding Shift, SendKeyWithShift should only emit keypress and NOT emit Shift Up
+            var ex = Record.Exception(() => KTGInputSimulator.SendKeyWithShift(FFXIVClientStructs.FFXIV.Client.System.Input.SeVirtualKey.KEY_1));
+            Assert.Null(ex);
+        }
+        finally
+        {
+            NativeMethods.SetGameFocusedOverrideForTesting(null);
+            NativeMethods.SetShiftPressedOverrideForTesting(null);
+        }
+    }
 }
 

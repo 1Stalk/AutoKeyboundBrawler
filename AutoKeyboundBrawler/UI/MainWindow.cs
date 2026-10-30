@@ -15,7 +15,7 @@ public class MainWindow : Window, IDisposable
     private const ImGuiWindowFlags BaseFlags =
         ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse | ImGuiWindowFlags.NoCollapse;
 
-    private static readonly Vector2 DefaultSize = new(280, 290);
+    private static readonly Vector2 DefaultSize = new(280, 325);
     private static readonly WindowSizeConstraints CompactConstraints = new()
     {
         MinimumSize = new Vector2(240, HeaderBar.Height),
@@ -24,7 +24,7 @@ public class MainWindow : Window, IDisposable
     private static readonly WindowSizeConstraints ExpandedConstraints = new()
     {
         MinimumSize = new Vector2(260, 220),
-        MaximumSize = new Vector2(360, 480),
+        MaximumSize = new Vector2(360, 520),
     };
 
     private readonly Configuration _config;
@@ -183,6 +183,14 @@ public class MainWindow : Window, IDisposable
                 FF7RTheme.MakoCyan, Loc.Get("AutoOpenRegTip")))
             {
                 _config.AutoOpenNearRegistrar = autoOpen;
+                _config.Save();
+            }
+
+            var requireFocus = _config.RequireWindowFocus;
+            if (FF7ToggleSwitch.DrawRow("##require_focus", Loc.Get("RequireFocus"), Loc.Get("RequireFocusSub"), ref requireFocus,
+                FF7RTheme.MakoCyan, Loc.Get("RequireFocusTip")))
+            {
+                _config.RequireWindowFocus = requireFocus;
                 _config.Save();
             }
 

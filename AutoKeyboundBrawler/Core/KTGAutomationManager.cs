@@ -76,7 +76,10 @@ public class KTGAutomationManager
         }
 
         // Keep-alive: Reset game-internal ContentInputTimer and input timers so FFXIV never auto-kicks for inactivity
-        KTGAntiAfk.KeepAlive();
+        if (KTGAntiAfk.ShouldKeepAlive(_config))
+        {
+            KTGAntiAfk.KeepAlive(_config);
+        }
 
         switch (CurrentPhase)
         {
