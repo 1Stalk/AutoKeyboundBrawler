@@ -23,15 +23,20 @@
     <Using Include="Xunit" />
   </ItemGroup>
 
+  <PropertyGroup>
+    <DalamudLibPath Condition="'$(DALAMUD_HOME)' != ''">$([MSBuild]::EnsureTrailingSlash('$(DALAMUD_HOME)'))</DalamudLibPath>
+    <DalamudLibPath Condition="'$(DALAMUD_HOME)' == ''">$(AppData)\XIVLauncher\addon\Hooks\dev\</DalamudLibPath>
+  </PropertyGroup>
+
   <ItemGroup>
     <Reference Include="Dalamud">
-      <HintPath>C:\Users\PC\AppData\Roaming\XIVLauncher\addon\Hooks\dev\Dalamud.dll</HintPath>
+      <HintPath>$(DalamudLibPath)Dalamud.dll</HintPath>
       <Private>false</Private>
     </Reference>
   </ItemGroup>
 
   <ItemGroup>
-    <None Include="C:\Users\PC\AppData\Roaming\XIVLauncher\addon\Hooks\dev\*.dll">
+    <None Include="$(DalamudLibPath)*.dll">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <Visible>false</Visible>
     </None>

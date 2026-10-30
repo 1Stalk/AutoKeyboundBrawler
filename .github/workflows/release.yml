@@ -44,6 +44,9 @@ jobs:
       - name: Build Plugin (Release)
         run: dotnet build AutoKeyboundBrawler.slnx --configuration Release --no-restore
 
+      - name: Run Unit Tests
+        run: dotnet test AutoKeyboundBrawler.slnx --configuration Release --no-build --logger "console;verbosity=normal"
+
       - name: Prepare Release Assets
         id: prepare_assets
         shell: pwsh
