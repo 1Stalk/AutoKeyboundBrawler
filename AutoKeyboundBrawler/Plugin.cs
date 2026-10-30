@@ -19,7 +19,7 @@ public sealed class Plugin : IDalamudPlugin
     public const string LongCommandName = "/autokeyboundbrawler";
 
     public static Plugin Instance { get; private set; } = null!;
-    public static Configuration Configuration { get; private set; } = null!;
+    public static Configuration Configuration { get; internal set; } = null!;
 
     public readonly WindowSystem WindowSystem = new("AutoKeyboundBrawler");
     private readonly MainWindow _mainWindow;

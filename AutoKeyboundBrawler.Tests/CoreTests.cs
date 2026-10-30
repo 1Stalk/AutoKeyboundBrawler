@@ -578,5 +578,64 @@ public class CoreTests
             NativeMethods.SetShiftPressedOverrideForTesting(null);
         }
     }
+
+    [Fact]
+    public void TestKTGInputSimulator_RequireWindowFocusFalse_AllowsTypingWhenUnfocused()
+    {
+        try
+        {
+            NativeMethods.SetGameFocusedOverrideForTesting(false);
+
+            var configFocused = new Configuration { RequireWindowFocus = true };
+            var configUnfocused = new Configuration { RequireWindowFocus = false };
+
+            // 1. ShouldBlockInput evaluation
+            Assert.True(KTGInputSimulator.ShouldBlockInput(configFocused));
+            Assert.False(KTGInputSimulator.ShouldBlockInput(configUnfocused));
+
+            // 2. Global Plugin.Configuration fallback when config is null
+            Plugin.Configuration = configUnfocused;
+            Assert.False(KTGInputSimulator.ShouldBlockInput(null));
+            Plugin.Configuration = configFocused;
+            Assert.True(KTGInputSimulator.ShouldBlockInput(null));
+
+            // 3. When RequireWindowFocus is false, Update allows processing even when unfocused
+            var sim = new KTGInputSimulator();
+            configUnfocused.CharDelayMinMs = 10;
+            configUnfocused.CharDelayMaxMs = 10;
+            sim.EnqueueWord("A", configUnfocused);
+            var initialRemaining = sim.RemainingChars;
+            Assert.True(initialRemaining > 0);
+
+            System.Threading.Thread.Sleep(25);
+            sim.Update(configUnfocused);
+            Assert.True(sim.RemainingChars < initialRemaining);
+        }
+        finally
+        {
+            NativeMethods.SetGameFocusedOverrideForTesting(null);
+            Plugin.Configuration = null!;
+        }
+    }
+
+    [Fact]
+    public void TestKTGAntiAfk_KeepAlive_ResolvesPluginConfiguration()
+    {
+        try
+        {
+            // Outside of duty, Plugin.Configuration with MinigameAutoplay=true should NOT keepalive
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(inDuty: false, inSquare: false);
+            Plugin.Configuration = new Configuration { Enabled = true, MinigameAutoplay = true };
+
+            // Should resolve Plugin.Configuration and return early safely
+            var ex = Record.Exception(() => KTGAntiAfk.KeepAlive());
+            Assert.Null(ex);
+        }
+        finally
+        {
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(null, null);
+            Plugin.Configuration = null!;
+        }
+    }
 }
 

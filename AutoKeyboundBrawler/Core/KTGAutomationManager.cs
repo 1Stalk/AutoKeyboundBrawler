@@ -232,7 +232,7 @@ public class KTGAutomationManager
         // 6. Pre-Typing Cleanliness: If KTGInput has leftover text, clear it first safely
         if (!AddonKTGInput.IsInputEmpty())
         {
-            if (KTGInputSimulator.TryClearInputBuffer())
+            if (KTGInputSimulator.TryClearInputBuffer(_config))
             {
                 CurrentStatus = "Clearing dirty input buffer...";
             }
@@ -269,7 +269,7 @@ public class KTGAutomationManager
             case HaltRecoveryState.SendEnter:
                 _log.Information("[AutoKeyboundBrawler] Exiting halt: pressing Enter to activate text input window...");
                 CurrentStatus = "Halt Recovery: Activating text input (Enter)...";
-                KTGInputSimulator.SendKey(FFXIVClientStructs.FFXIV.Client.System.Input.SeVirtualKey.RETURN);
+                KTGInputSimulator.SendKey(FFXIVClientStructs.FFXIV.Client.System.Input.SeVirtualKey.RETURN, _config);
                 _lastHaltRecoveryTime = DateTime.UtcNow;
                 _haltRecoveryState = HaltRecoveryState.WaitAfterEnter;
                 return true;
@@ -287,7 +287,7 @@ public class KTGAutomationManager
                 {
                     _log.Information("[AutoKeyboundBrawler] Input has cancelled text after halt. Pressing Escape to clear...");
                     CurrentStatus = "Halt Recovery: Cancelling leftover text (Esc)...";
-                    KTGInputSimulator.SendKey(FFXIVClientStructs.FFXIV.Client.System.Input.SeVirtualKey.ESCAPE);
+                    KTGInputSimulator.SendKey(FFXIVClientStructs.FFXIV.Client.System.Input.SeVirtualKey.ESCAPE, _config);
                     _lastHaltRecoveryTime = DateTime.UtcNow;
                     _haltRecoveryState = HaltRecoveryState.WaitAfterEscape;
                     return true;
@@ -311,7 +311,7 @@ public class KTGAutomationManager
                     // If buffer is still dirty after 300ms, retry Escape once
                     if ((DateTime.UtcNow - _lastHaltRecoveryTime).TotalMilliseconds > 300)
                     {
-                        KTGInputSimulator.SendKey(FFXIVClientStructs.FFXIV.Client.System.Input.SeVirtualKey.ESCAPE);
+                        KTGInputSimulator.SendKey(FFXIVClientStructs.FFXIV.Client.System.Input.SeVirtualKey.ESCAPE, _config);
                         _lastHaltRecoveryTime = DateTime.UtcNow;
                     }
                     return true;

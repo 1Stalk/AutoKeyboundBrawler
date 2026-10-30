@@ -12,6 +12,8 @@ internal static unsafe class NativeMethods
 
     // Virtual key codes
     public const ushort VK_SHIFT = 0x10;
+    public const ushort VK_LSHIFT = 0xA0;
+    public const ushort VK_RSHIFT = 0xA1;
 
     // SendInput / keybd_event flags
     public const uint INPUT_KEYBOARD = 1;
@@ -147,7 +149,9 @@ internal static unsafe class NativeMethods
 
         try
         {
-            return (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
+            return (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0 ||
+                   (GetAsyncKeyState(VK_LSHIFT) & 0x8000) != 0 ||
+                   (GetAsyncKeyState(VK_RSHIFT) & 0x8000) != 0;
         }
         catch
         {

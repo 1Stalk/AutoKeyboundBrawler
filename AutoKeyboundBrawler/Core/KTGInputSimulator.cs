@@ -116,6 +116,12 @@ public unsafe class KTGInputSimulator
         _stepStopwatch.Reset();
     }
 
+    public static bool ShouldBlockInput(Configuration? config = null)
+    {
+        var requireFocus = config?.RequireWindowFocus ?? Plugin.Configuration?.RequireWindowFocus ?? true;
+        return requireFocus && !NativeMethods.IsGameFocused();
+    }
+
     public void Update(Configuration config)
     {
         if (!IsTyping)
@@ -123,7 +129,7 @@ public unsafe class KTGInputSimulator
             return;
         }
 
-        if (config.RequireWindowFocus && !NativeMethods.IsGameFocused())
+        if (ShouldBlockInput(config))
         {
             return;
         }
@@ -143,15 +149,15 @@ public unsafe class KTGInputSimulator
         var action = _pendingActions.Dequeue();
         if (action.IsUnicode)
         {
-            SendUnicodeChar(action.Character);
+            SendUnicodeChar(action.Character, config);
         }
         else if (action.RequiresShift)
         {
-            SendKeyWithShift(action.VirtualKey);
+            SendKeyWithShift(action.VirtualKey, config);
         }
         else
         {
-            SendKey(action.VirtualKey);
+            SendKey(action.VirtualKey, config);
         }
 
         if (!action.IsUnicode && action.VirtualKey == SeVirtualKey.RETURN)
@@ -189,10 +195,10 @@ public unsafe class KTGInputSimulator
     /// - Verifies that KTGInput is active before sending Escape (if inactive, presses Enter first to activate).
     /// - Strictly throttles Escape to at most once per 600ms to prevent double-press triggering the Exit Duty / System Menu.
     /// </summary>
-    public static bool TryClearInputBuffer()
+    public static bool TryClearInputBuffer(Configuration? config = null)
     {
         // 0. NEVER send keys if the game window is not focused!
-        if (!NativeMethods.IsGameFocused())
+        if (ShouldBlockInput(config))
         {
             return false;
         }
@@ -209,7 +215,7 @@ public unsafe class KTGInputSimulator
         // Send Enter first to activate the text window.
         if (!AddonKTGInput.IsInputActive())
         {
-            SendKey(SeVirtualKey.RETURN);
+            SendKey(SeVirtualKey.RETURN, config);
             return false;
         }
 
@@ -220,13 +226,13 @@ public unsafe class KTGInputSimulator
         }
 
         _lastEscapeTime = DateTime.UtcNow;
-        SendKey(SeVirtualKey.ESCAPE);
+        SendKey(SeVirtualKey.ESCAPE, config);
         return true;
     }
 
-    public static void SendEscape()
+    public static void SendEscape(Configuration? config = null)
     {
-        TryClearInputBuffer();
+        TryClearInputBuffer(config);
     }
 
     private int GetRandomCharDelay(Configuration config)
@@ -236,9 +242,9 @@ public unsafe class KTGInputSimulator
         return _random.Next(min, max + 1);
     }
 
-    public static void SendKey(SeVirtualKey key)
+    public static void SendKey(SeVirtualKey key, Configuration? config = null)
     {
-        if (!NativeMethods.IsGameFocused())
+        if (ShouldBlockInput(config))
         {
             return;
         }
@@ -267,9 +273,9 @@ public unsafe class KTGInputSimulator
         NativeMethods.keybd_event(vk, 0, NativeMethods.KEYEVENTF_KEYUP, 0);
     }
 
-    public static void SendKeyWithShift(SeVirtualKey key)
+    public static void SendKeyWithShift(SeVirtualKey key, Configuration? config = null)
     {
-        if (!NativeMethods.IsGameFocused())
+        if (ShouldBlockInput(config))
         {
             return;
         }
@@ -354,9 +360,9 @@ public unsafe class KTGInputSimulator
         NativeMethods.keybd_event((byte)NativeMethods.VK_SHIFT, 0, NativeMethods.KEYEVENTF_KEYUP, 0);
     }
 
-    public static void SendUnicodeChar(char c)
+    public static void SendUnicodeChar(char c, Configuration? config = null)
     {
-        if (!NativeMethods.IsGameFocused())
+        if (ShouldBlockInput(config))
         {
             return;
         }

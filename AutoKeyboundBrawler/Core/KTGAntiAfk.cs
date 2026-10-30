@@ -49,6 +49,7 @@ public static unsafe class KTGAntiAfk
 
     public static void KeepAlive(Configuration? config = null, bool force = false)
     {
+        config ??= Plugin.Configuration;
         if (!force && config != null && !ShouldKeepAlive(config))
         {
             return;
