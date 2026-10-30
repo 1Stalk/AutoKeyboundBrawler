@@ -37,15 +37,26 @@ public class CoreTests
     [Fact]
     public void TestStripPunctuation_EnglishAndFrench()
     {
+        // Null, empty, and whitespace
+        Assert.Equal(string.Empty, KTGWordDatabase.StripPunctuation(null!));
+        Assert.Equal(string.Empty, KTGWordDatabase.StripPunctuation(string.Empty));
+        Assert.Equal(string.Empty, KTGWordDatabase.StripPunctuation("   "));
+        Assert.Equal(string.Empty, KTGWordDatabase.StripPunctuation("!??-"));
+
+        // English words
         Assert.Equal("Dont", KTGWordDatabase.StripPunctuation("Don't"));
         Assert.Equal("Allout attack", KTGWordDatabase.StripPunctuation("All-out attack!"));
+
+        // French typography (space preceding exclamation/question mark is removed)
         Assert.Equal("tous", KTGWordDatabase.StripPunctuation("tous !"));
         Assert.Equal("pret", KTGWordDatabase.StripPunctuation("pret ?"));
+        Assert.Equal("Cest pret", KTGWordDatabase.StripPunctuation("C'est pret !"));
     }
 
     [Fact]
     public void TestStripPunctuation_Japanese()
     {
+        Assert.Equal(string.Empty, KTGWordDatabase.StripPunctuation("！？「」・～〜、。"));
         Assert.Equal("サボテンダー", KTGWordDatabase.StripPunctuation("サボテンダー！"));
         Assert.Equal("針本", KTGWordDatabase.StripPunctuation("針？本"));
         Assert.Equal("命は星を巡る", KTGWordDatabase.StripPunctuation("「命は星を巡る」"));
@@ -165,12 +176,23 @@ public class CoreTests
     [Fact]
     public void TestKTGStateReader_IsSameWord()
     {
+        // Equivalent words with differing cases and punctuation
         Assert.True(KTGStateReader.IsSameWord("Don't", "Dont"));
+        Assert.True(KTGStateReader.IsSameWord("  Don't  ", "Dont"));
         Assert.True(KTGStateReader.IsSameWord("tous !", "tous"));
         Assert.True(KTGStateReader.IsSameWord("サボテンダー！", "サボテンダー"));
         Assert.True(KTGStateReader.IsSameWord("Test", "test"));
+
+        // Different words
         Assert.False(KTGStateReader.IsSameWord("Cactuar", "Airbuster"));
+
+        // Null and whitespace edge cases
+        Assert.False(KTGStateReader.IsSameWord(null, null));
         Assert.False(KTGStateReader.IsSameWord(null, "Test"));
+        Assert.False(KTGStateReader.IsSameWord("Test", null));
+        Assert.False(KTGStateReader.IsSameWord(string.Empty, string.Empty));
+        Assert.False(KTGStateReader.IsSameWord("   ", "Test"));
+        Assert.False(KTGStateReader.IsSameWord("Test", "   "));
     }
 
     [Fact]
@@ -196,12 +218,23 @@ public class CoreTests
         var idleCactuar = new KTGTargetWord(7, "サボテンダー", 500f, 100f);
         Assert.Equal(3, KTGStateReader.GetTargetPriority(idleCactuar, true, needleSlots, otherCasts, false, null, config));
 
-        // Tier 4: Regular add with boss on screen
+        // Tier 4: Regular add with boss on screen (PrioritizeAdds = true)
         var regularAdd = new KTGTargetWord(8, "Sweep Flank", 500f, 100f);
         Assert.Equal(4, KTGStateReader.GetTargetPriority(regularAdd, true, needleSlots, otherCasts, false, null, config));
 
-        // Tier 6/7: Boss (Slot 2)
+        // Tier 5: Standard wave regular enemies (no boss on screen)
+        Assert.Equal(5, KTGStateReader.GetTargetPriority(regularAdd, false, needleSlots, otherCasts, false, null, config));
+
+        // Tier 5: Regular add with boss on screen when PrioritizeAdds = false
+        var configNoAdds = new Configuration { PrioritizeAdds = false };
+        Assert.Equal(5, KTGStateReader.GetTargetPriority(regularAdd, true, needleSlots, otherCasts, false, null, configNoAdds));
+
+        // Tier 6: Casting Boss (Slot 2 in otherCasts or needleSlots)
+        var castingBossSlots = new HashSet<int>(otherCasts) { 2 };
         var idleBoss = new KTGTargetWord(2, "Airbuster", 200f, 100f);
+        Assert.Equal(6, KTGStateReader.GetTargetPriority(idleBoss, true, needleSlots, castingBossSlots, false, null, config));
+
+        // Tier 7: Idle Boss (Slot 2)
         Assert.Equal(7, KTGStateReader.GetTargetPriority(idleBoss, true, needleSlots, otherCasts, false, null, config));
     }
 
@@ -249,6 +282,7 @@ public class CoreTests
         Assert.True(config.AutoOpenNearRegistrar);
         Assert.True(config.PrioritizeDefense);
         Assert.True(config.StopOnPenaltyCast);
+        Assert.True(config.RequireWindowFocus);
 
         config.SetAutoLoop(true);
         Assert.True(config.AutoLoopEnabled);
@@ -265,13 +299,43 @@ public class CoreTests
         config.SetAutoLoop(false);
         Assert.False(config.AutoLoopEnabled);
         Assert.False(config.Enabled); // Both false now
-    }
 
+        // Initialize reconciliation and safety overrides
+        var configInit = new Configuration
+        {
+            RequireWindowFocus = false,
+            StopOnPenaltyCast = false,
+            AutoTalkRegistrar = true,
+            AutoConfirmRegister = true,
+            AutoLoopEnabled = false,
+            MinigameAutoplay = false
+        };
+        configInit.Initialize(null!);
+
+        // Safety guards must be forcibly re-enabled
+        Assert.True(configInit.RequireWindowFocus);
+        Assert.True(configInit.StopOnPenaltyCast);
+        Assert.True(configInit.PrioritizeAdds);
+        Assert.True(configInit.PrioritizeDefense);
+        Assert.True(configInit.AbortForDefense);
+        Assert.True(configInit.MemoryModeObscured);
+
+        // AutoLoopEnabled forced true when both sub-flags active
+        Assert.True(configInit.AutoLoopEnabled);
+        Assert.True(configInit.Enabled);
+    }
 
     [Fact]
     public void TestKTGLocalizationRegistry_IsRegistrar_Null()
     {
+        // IGameObject null safety
         Assert.False(KTGLocalizationRegistry.IsRegistrar((Dalamud.Game.ClientState.Objects.Types.IGameObject?)null));
+
+        // Name and DataId null and whitespace safety
+        Assert.False(KTGLocalizationRegistry.IsRegistrar(0, null));
+        Assert.False(KTGLocalizationRegistry.IsRegistrar(0, string.Empty));
+        Assert.False(KTGLocalizationRegistry.IsRegistrar(0, "   "));
+        Assert.False(KTGLocalizationRegistry.IsRegistrar(999, null));
     }
 
     [Fact]
@@ -487,6 +551,11 @@ public class CoreTests
             config.AutoLoopEnabled = false;
             Assert.False(KTGAntiAfk.ShouldKeepAlive(config));
 
+            // With both true: keepalive in duty
+            config.MinigameAutoplay = true;
+            config.AutoLoopEnabled = true;
+            Assert.True(KTGAntiAfk.ShouldKeepAlive(config));
+
             // Case 3: In Keybound Square with AutoLoop active (Anti-AFK must ONLY work inside event duty)
             KTGSafetyGuard.SetTerritoryOverridesForTesting(inDuty: false, inSquare: true);
             config.AutoLoopEnabled = true;
@@ -498,7 +567,12 @@ public class CoreTests
             config.MinigameAutoplay = true;
             Assert.False(KTGAntiAfk.ShouldKeepAlive(config));
 
-            // Case 5: Master Enabled is false
+            // Case 5: In Keybound Square with BOTH toggles active (strict duty scoping)
+            config.AutoLoopEnabled = true;
+            config.MinigameAutoplay = true;
+            Assert.False(KTGAntiAfk.ShouldKeepAlive(config));
+
+            // Case 6: Master Enabled is false
             config.Enabled = false;
             KTGSafetyGuard.SetTerritoryOverridesForTesting(inDuty: true, inSquare: false);
             Assert.False(KTGAntiAfk.ShouldKeepAlive(config));
@@ -670,26 +744,19 @@ public class CoreTests
             KTGSafetyGuard.SetTerritoryOverridesForTesting(inDuty: false, inSquare: true);
             Assert.False(KTGAntiAfk.ShouldKeepAlive(config));
 
-            // 3. When Enabled is false: ShouldKeepAlive is false even if individual checkboxes are true
-            config.MinigameAutoplay = true;
-            config.AutoLoopEnabled = true;
-            config.Enabled = false;
-            KTGSafetyGuard.SetTerritoryOverridesForTesting(inDuty: true, inSquare: false);
-            Assert.False(KTGAntiAfk.ShouldKeepAlive(config));
-
-            KTGSafetyGuard.SetTerritoryOverridesForTesting(inDuty: false, inSquare: true);
-            Assert.False(KTGAntiAfk.ShouldKeepAlive(config));
-
-            // 4. KeepAlive with idle config returns safely without throwing or executing
-            config.Enabled = true;
-            config.MinigameAutoplay = false;
-            config.AutoLoopEnabled = false;
+            // 3. KeepAlive with idle config returns safely without throwing or executing
             var ex = Record.Exception(() => KTGAntiAfk.KeepAlive(config));
             Assert.Null(ex);
+
+            // 4. Resolves Plugin.Configuration when idle
+            Plugin.Configuration = config;
+            var exPluginConfig = Record.Exception(() => KTGAntiAfk.KeepAlive());
+            Assert.Null(exPluginConfig);
         }
         finally
         {
             KTGSafetyGuard.SetTerritoryOverridesForTesting(null, null);
+            Plugin.Configuration = null!;
         }
     }
 
@@ -718,7 +785,7 @@ public class CoreTests
     }
 
     [Fact]
-    public void TestMainWindow_OriginalDimensionsAndFocusSafety()
+    public void TestMainWindow_OriginalDimensionsAndConstraints()
     {
         var flags = System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static;
         var defaultSizeField = typeof(AutoKeyboundBrawler.UI.MainWindow).GetField("DefaultSize", flags);
@@ -731,41 +798,33 @@ public class CoreTests
         Assert.NotNull(constraintsField);
         var constraints = (Dalamud.Interface.Windowing.WindowSizeConstraints)constraintsField.GetValue(null)!;
         Assert.Equal(480f, constraints.MaximumSize.Y);
-
-        // Verify background focus safety remains active by default
-        var config = new Configuration();
-        Assert.True(config.RequireWindowFocus);
-        config.Initialize(null!);
-        Assert.True(config.RequireWindowFocus);
     }
 
-    [Fact]
-    public void TestKTGAutomationManager_TypingSolverOnlyDoesNotInterfereInSquare()
+    [Theory]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public void TestKTGAutomationManager_InSquare_BehaviorAcrossToggleCombinations(bool autoplay, bool autoLoop)
     {
         try
         {
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(inDuty: false, inSquare: true);
+
             var config = new Configuration
             {
                 Enabled = true,
-                MinigameAutoplay = true,
-                AutoLoopEnabled = false
+                MinigameAutoplay = autoplay,
+                AutoLoopEnabled = autoLoop,
+                RequireWindowFocus = false
             };
 
-            // In Square: MinigameAutoplay=true must not trigger keep-alive
-            KTGSafetyGuard.SetTerritoryOverridesForTesting(inDuty: false, inSquare: true);
-            Assert.False(KTGAntiAfk.ShouldKeepAlive(config));
-
-            var manager = new KTGAutomationManager(config, null!);
+            var manager = new KTGAutomationManager(config, null);
             manager.Tick();
 
-            // Status is square, but loop automation and typing are not active
-            Assert.Equal("In Keybound Square", manager.CurrentStatus);
             Assert.Equal(EventPhase.InSquare, manager.CurrentPhase);
+            Assert.Equal("In Keybound Square", manager.CurrentStatus);
+            Assert.False(manager.IsInDutyPhase);
             Assert.False(manager.IsTyping);
-
-            // In Duty: MinigameAutoplay=true DOES trigger keep-alive
-            KTGSafetyGuard.SetTerritoryOverridesForTesting(inDuty: true, inSquare: false);
-            Assert.True(KTGAntiAfk.ShouldKeepAlive(config));
         }
         finally
         {
@@ -774,10 +833,12 @@ public class CoreTests
     }
 
     [Fact]
-    public void TestKTGAutomationManager_AfkLoopOnlyKeepsAliveInDuty()
+    public void TestKTGAutomationManager_AfkLoopOnlyInDuty()
     {
         try
         {
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(inDuty: true, inSquare: false);
+
             var config = new Configuration
             {
                 Enabled = true,
@@ -785,21 +846,13 @@ public class CoreTests
                 AutoLoopEnabled = true
             };
 
-            // In Duty: AutoLoopEnabled=true triggers keep-alive even when MinigameAutoplay=false
-            KTGSafetyGuard.SetTerritoryOverridesForTesting(inDuty: true, inSquare: false);
-            Assert.True(KTGAntiAfk.ShouldKeepAlive(config));
-
-            var manager = new KTGAutomationManager(config, null!);
+            var manager = new KTGAutomationManager(config, null);
             manager.Tick();
 
             // In duty, minigame phase does not type when MinigameAutoplay is false
             Assert.Equal("Minigame Autoplay Disabled", manager.CurrentStatus);
             Assert.Equal(EventPhase.InMinigame, manager.CurrentPhase);
             Assert.False(manager.IsTyping);
-
-            // In Square: AutoLoopEnabled=true must NOT trigger keep-alive (strictly duty only)
-            KTGSafetyGuard.SetTerritoryOverridesForTesting(inDuty: false, inSquare: true);
-            Assert.False(KTGAntiAfk.ShouldKeepAlive(config));
         }
         finally
         {
@@ -822,40 +875,6 @@ public class CoreTests
         KTGSafetyGuard.SetTerritoryOverridesForTesting(null, null);
         Assert.False(KTGSafetyGuard.IsInEventDuty);
         Assert.False(KTGSafetyGuard.IsInKeyboundSquare);
-    }
-
-    [Fact]
-    public void TestKTGAntiAfk_StrictDutyScoping_SquareNeverKeepsAlive()
-    {
-        try
-        {
-            var config = new Configuration
-            {
-                Enabled = true,
-                MinigameAutoplay = true,
-                AutoLoopEnabled = true
-            };
-
-            // In Square: even with both MinigameAutoplay and AutoLoopEnabled true, KeepAlive must NOT trigger
-            KTGSafetyGuard.SetTerritoryOverridesForTesting(inDuty: false, inSquare: true);
-            Assert.False(KTGAntiAfk.ShouldKeepAlive(config));
-
-            // Calling KeepAlive with force=false when in Square must be a no-op
-            var ex = Record.Exception(() => KTGAntiAfk.KeepAlive(config, force: false));
-            Assert.Null(ex);
-
-            // In open world / other territories: KeepAlive must NOT trigger
-            KTGSafetyGuard.SetTerritoryOverridesForTesting(inDuty: false, inSquare: false);
-            Assert.False(KTGAntiAfk.ShouldKeepAlive(config));
-
-            // ONLY inside duty does KeepAlive trigger
-            KTGSafetyGuard.SetTerritoryOverridesForTesting(inDuty: true, inSquare: false);
-            Assert.True(KTGAntiAfk.ShouldKeepAlive(config));
-        }
-        finally
-        {
-            KTGSafetyGuard.SetTerritoryOverridesForTesting(null, null);
-        }
     }
 
     [Fact]
@@ -888,37 +907,7 @@ public class CoreTests
     }
 
     [Fact]
-    public void TestKTGAutomationManager_AutoLoopInSquare_OperatesWithoutAntiAfk()
-    {
-        try
-        {
-            var config = new Configuration
-            {
-                Enabled = true,
-                MinigameAutoplay = false,
-                AutoLoopEnabled = true
-            };
-
-            // In Square: AutoLoopEnabled is true. Manager must transition to InSquare phase.
-            KTGSafetyGuard.SetTerritoryOverridesForTesting(inDuty: false, inSquare: true);
-
-            var manager = new KTGAutomationManager(config, null!);
-            manager.Tick();
-
-            Assert.Equal(EventPhase.InSquare, manager.CurrentPhase);
-            // In square, Anti-AFK must NEVER run
-            Assert.False(KTGAntiAfk.ShouldKeepAlive(config));
-            // Simulator should not be typing in the Square
-            Assert.False(manager.IsTyping);
-        }
-        finally
-        {
-            KTGSafetyGuard.SetTerritoryOverridesForTesting(null, null);
-        }
-    }
-
-    [Fact]
-    public void TestKTGSafetyGuard_CanType_BlockedInKeyboundSquare()
+    public void TestKTGSafetyGuard_CanType_RejectionHierarchy()
     {
         try
         {
@@ -930,49 +919,27 @@ public class CoreTests
                 RequireWindowFocus = false
             };
 
-            // In Square: CanType must return false because player is outside duty
+            // 1. In Square: CanType must return false because player is outside duty
             KTGSafetyGuard.SetTerritoryOverridesForTesting(inDuty: false, inSquare: true);
             Assert.False(KTGSafetyGuard.CanType(config, out var reasonSquare));
             Assert.Equal("Not in Keybound Brawler duty", reasonSquare);
 
-            // In Duty: CanType returns true
+            // 2. In Duty: when Enabled is false -> "Plugin disabled"
             KTGSafetyGuard.SetTerritoryOverridesForTesting(inDuty: true, inSquare: false);
+            config.Enabled = false;
+            Assert.False(KTGSafetyGuard.CanType(config, out var reasonDisabled));
+            Assert.Equal("Plugin disabled", reasonDisabled);
+
+            // 3. In Duty: when MinigameAutoplay is false -> "Minigame autoplay disabled"
+            config.Enabled = true;
+            config.MinigameAutoplay = false;
+            Assert.False(KTGSafetyGuard.CanType(config, out var reasonAutoplay));
+            Assert.Equal("Minigame autoplay disabled", reasonAutoplay);
+
+            // 4. In Duty: all conditions met -> returns true ("OK")
+            config.MinigameAutoplay = true;
             Assert.True(KTGSafetyGuard.CanType(config, out var reasonDuty));
             Assert.Equal("OK", reasonDuty);
-        }
-        finally
-        {
-            KTGSafetyGuard.SetTerritoryOverridesForTesting(null, null);
-        }
-    }
-
-    [Fact]
-    public void TestKTGAutomationManager_InSquare_BothTogglesActiveNeverTriggersKeepAliveOrTyping()
-    {
-        try
-        {
-            var config = new Configuration
-            {
-                Enabled = true,
-                MinigameAutoplay = true,
-                AutoLoopEnabled = true,
-                RequireWindowFocus = false
-            };
-
-            KTGSafetyGuard.SetTerritoryOverridesForTesting(inDuty: false, inSquare: true);
-
-            var manager = new KTGAutomationManager(config, null!);
-            manager.Tick();
-
-            // Manager correctly identifies InSquare phase
-            Assert.Equal(EventPhase.InSquare, manager.CurrentPhase);
-            Assert.False(manager.IsInDutyPhase);
-
-            // Anti-afk must strictly remain false in Square
-            Assert.False(KTGAntiAfk.ShouldKeepAlive(config));
-
-            // Typing simulator must not be typing in Square
-            Assert.False(manager.IsTyping);
         }
         finally
         {
@@ -1045,6 +1012,21 @@ public class CoreTests
         Assert.True(didOpen);
         Assert.True(shouldOpen);
         Assert.True(hasTriggered);
+
+        // Exact boundary test: exactly 7.0f triggers open when not previously triggered
+        hasTriggered = false;
+        var didOpenExact = Plugin.UpdateProximityState(ref hasTriggered, 7.0f, isCurrentlyOpen: false, out var shouldOpenExact);
+        Assert.True(didOpenExact);
+        Assert.True(shouldOpenExact);
+        Assert.True(hasTriggered);
+
+        // Exact boundary test: exactly 9.5f stays within hysteresis deadband (trigger remains latched)
+        Plugin.UpdateProximityState(ref hasTriggered, 9.5f, isCurrentlyOpen: false, out _);
+        Assert.True(hasTriggered);
+
+        // Distance strictly greater than 9.5f (9.51f) unlatches trigger
+        Plugin.UpdateProximityState(ref hasTriggered, 9.51f, isCurrentlyOpen: false, out _);
+        Assert.False(hasTriggered);
     }
 
     [Fact]
@@ -1275,12 +1257,18 @@ public class CoreTests
     }
 
     [Fact]
-    public void TestLoc_MgcLocalization()
+    public void TestLoc_LocalizationAndFallbacks()
     {
         var originalConfig = Plugin.Configuration;
         try
         {
             Plugin.Configuration = new Configuration();
+
+            // Language Short Names
+            Assert.Equal("JA", Loc.GetLanguageShortName(Dalamud.Game.ClientLanguage.Japanese));
+            Assert.Equal("DE", Loc.GetLanguageShortName(Dalamud.Game.ClientLanguage.German));
+            Assert.Equal("FR", Loc.GetLanguageShortName(Dalamud.Game.ClientLanguage.French));
+            Assert.Equal("EN", Loc.GetLanguageShortName(Dalamud.Game.ClientLanguage.English));
 
             // Key MGC
             Assert.Equal("MGC", Loc.Get("MGC"));
@@ -1288,18 +1276,25 @@ public class CoreTests
             // Japanese
             Plugin.Configuration.SelectedLanguage = Dalamud.Game.ClientLanguage.Japanese;
             Assert.Equal("マンダヴィル・ゴールドソーサークレジット (MGC)", Loc.Get("MgcTooltip"));
+            Assert.Equal("タイピング自動入力", Loc.Get("TypingSolver"));
 
             // German
             Plugin.Configuration.SelectedLanguage = Dalamud.Game.ClientLanguage.German;
             Assert.Equal("Manderville-Gold-Saucer-Credits (MGC)", Loc.Get("MgcTooltip"));
+            Assert.Equal("Tipp-Automatik", Loc.Get("TypingSolver"));
 
             // French
             Plugin.Configuration.SelectedLanguage = Dalamud.Game.ClientLanguage.French;
             Assert.Equal("Crédits du Gold Saucer Manderville (MGC)", Loc.Get("MgcTooltip"));
+            Assert.Equal("Solveur de frappe", Loc.Get("TypingSolver"));
 
             // English
             Plugin.Configuration.SelectedLanguage = Dalamud.Game.ClientLanguage.English;
             Assert.Equal("Manderville Gold Saucer Credits (MGC)", Loc.Get("MgcTooltip"));
+            Assert.Equal("Typing Solver", Loc.Get("TypingSolver"));
+
+            // Fallback for unmapped key returns the key itself
+            Assert.Equal("UnknownKeyTest404", Loc.Get("UnknownKeyTest404"));
         }
         finally
         {
@@ -1325,6 +1320,281 @@ public class CoreTests
         var p2 = Assert.Single(getItemMaxCount.GetParameters());
         Assert.Equal(typeof(uint), p2.ParameterType);
     }
+
+    [Fact]
+    public void TestKTGAutomationManager_SafetyHaltInDuty_ClearsActiveTyping()
+    {
+        try
+        {
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(inDuty: true, inSquare: false);
+            NativeMethods.SetGameFocusedOverrideForTesting(true);
+
+            var config = new Configuration
+            {
+                Enabled = true,
+                MinigameAutoplay = true,
+                RequireWindowFocus = true
+            };
+
+            var manager = new KTGAutomationManager(config, null);
+
+            // Pre-condition: active typing in minigame
+            var simField = typeof(KTGAutomationManager).GetField("_simulator", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            Assert.NotNull(simField);
+            var sim = (KTGInputSimulator)simField.GetValue(manager)!;
+            sim.EnqueueWord("Airbuster", config);
+
+            Assert.True(manager.IsTyping);
+            Assert.Equal("Airbuster", manager.ActiveWord);
+
+            // Window loses focus while in duty -> triggers safety halt
+            NativeMethods.SetGameFocusedOverrideForTesting(false);
+            manager.Tick();
+
+            // When safety guard fails CanType in duty, manager enters SAFETY HALT and aborts typing
+            Assert.Equal(EventPhase.InMinigame, manager.CurrentPhase);
+            Assert.StartsWith("SAFETY HALT:", manager.CurrentStatus);
+            Assert.Contains("Game window is not focused", manager.CurrentStatus);
+            Assert.True(manager.IsHaltStatus);
+            Assert.False(manager.IsTyping);
+            Assert.Equal(string.Empty, manager.ActiveWord);
+        }
+        finally
+        {
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(null, null);
+            NativeMethods.SetGameFocusedOverrideForTesting(null);
+        }
+    }
+
+    [Fact]
+    public void TestKTGAutomationManager_HaltExitRecovery_StateMachine()
+    {
+        try
+        {
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(inDuty: true, inSquare: false);
+            NativeMethods.SetGameFocusedOverrideForTesting(false);
+
+            var config = new Configuration
+            {
+                Enabled = true,
+                MinigameAutoplay = true,
+                RequireWindowFocus = true
+            };
+
+            var manager = new KTGAutomationManager(config, null);
+            // 1. Enter halt while unfocused
+            manager.Tick();
+            Assert.True(manager.IsHaltStatus);
+
+            // 2. Restore window focus -> exits halt into recovery step 1 (SendEnter)
+            NativeMethods.SetGameFocusedOverrideForTesting(true);
+            manager.Tick();
+            Assert.StartsWith("Halt Recovery: Activating text input", manager.CurrentStatus);
+
+            // 3. Sub-120ms tick -> stays in wait state
+            manager.Tick();
+            Assert.StartsWith("Halt Recovery:", manager.CurrentStatus);
+
+            // 4. Advance past 120ms window focus wait delay
+            var recoveryTimeField = typeof(KTGAutomationManager).GetField("_lastHaltRecoveryTime", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            Assert.NotNull(recoveryTimeField);
+            recoveryTimeField.SetValue(manager, DateTime.UtcNow.AddMilliseconds(-200));
+
+            manager.Tick();
+            // Input buffer is clean in mock/test environment -> recovery completes, resumes normal combat status
+            Assert.False(manager.IsHaltStatus);
+            Assert.Equal("In Combat (Waiting for word...)", manager.CurrentStatus);
+        }
+        finally
+        {
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(null, null);
+            NativeMethods.SetGameFocusedOverrideForTesting(null);
+        }
+    }
+
+    [Fact]
+    public void TestKTGAutomationManager_TransitionToResults_ClearsTypingAndActiveWord()
+    {
+        try
+        {
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(inDuty: true, inSquare: false);
+            NativeMethods.SetGameFocusedOverrideForTesting(true);
+
+            var config = new Configuration
+            {
+                Enabled = true,
+                MinigameAutoplay = true,
+                AutoLoopEnabled = false
+            };
+
+            var manager = new KTGAutomationManager(config, null);
+
+            var simField = typeof(KTGAutomationManager).GetField("_simulator", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            Assert.NotNull(simField);
+            var sim = (KTGInputSimulator)simField.GetValue(manager)!;
+            sim.EnqueueWord("FinalBossWord", config);
+
+            Assert.True(manager.IsTyping);
+            Assert.Equal("FinalBossWord", manager.ActiveWord);
+
+            // Abrupt transition to Results screen (HandleResultsPhase)
+            var handleResultsMethod = typeof(KTGAutomationManager).GetMethod("HandleResultsPhase", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            Assert.NotNull(handleResultsMethod);
+            handleResultsMethod.Invoke(manager, null);
+
+            Assert.Equal("Minigame Finished (Results Screen)", manager.CurrentStatus);
+            Assert.False(manager.IsTyping);
+            Assert.Equal(string.Empty, manager.ActiveWord);
+            Assert.Equal(0, manager.RemainingChars);
+        }
+        finally
+        {
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(null, null);
+            NativeMethods.SetGameFocusedOverrideForTesting(null);
+        }
+    }
+
+    [Fact]
+    public void TestKTGWordDatabase_DetermineIsDefense()
+    {
+        // Special row 240
+        Assert.True(KTGWordDatabase.DetermineIsDefense(240, "Arbitrary text", "Arbitrary text"));
+
+        // Specific Japanese defense phrases
+        Assert.True(KTGWordDatabase.DetermineIsDefense(100, "どんなときでもソルジャーの誇りは手放すな", ""));
+        Assert.True(KTGWordDatabase.DetermineIsDefense(100, "我が剣のサビとなれ！", ""));
+        Assert.True(KTGWordDatabase.DetermineIsDefense(100, "命は星を巡る", ""));
+        Assert.True(KTGWordDatabase.DetermineIsDefense(100, "マタ・タビ", ""));
+        Assert.True(KTGWordDatabase.DetermineIsDefense(100, "星の輝きを力に！", ""));
+
+        // Japanese quotation brackets
+        Assert.True(KTGWordDatabase.DetermineIsDefense(100, "「サボテンダー」", ""));
+
+        // Explicit defense skills / shield prompts in English and Japanese
+        Assert.True(KTGWordDatabase.DetermineIsDefense(100, "Defensive Barrier", "Defensive Barrier"));
+        Assert.True(KTGWordDatabase.DetermineIsDefense(100, "防御態勢", "Defense Mode"));
+        Assert.True(KTGWordDatabase.DetermineIsDefense(100, "光の盾", "Lustrous Shield"));
+
+        // Magic pot items are enemy requests, NOT defense
+        Assert.False(KTGWordDatabase.DetermineIsDefense(100, "エリクサーちょうだい！", "Gimme Elixir!"));
+
+        // Enemy mobs with barrier in their names are NOT defense
+        Assert.False(KTGWordDatabase.DetermineIsDefense(100, "マバリア", "manaward"));
+        Assert.False(KTGWordDatabase.DetermineIsDefense(100, "バリア", "barrier"));
+
+        // Non-defense regular mobs and adds
+        Assert.False(KTGWordDatabase.DetermineIsDefense(100, "サボテンダー", "Cactuar"));
+        Assert.False(KTGWordDatabase.DetermineIsDefense(100, "Airbuster", "Airbuster"));
+        Assert.False(KTGWordDatabase.DetermineIsDefense(100, "Grenade", "Grenade"));
+        Assert.False(KTGWordDatabase.DetermineIsDefense(0, "", ""));
+    }
+
+    [Fact]
+    public void TestKTGStateReader_InvalidateSubmittedWord_AndClearCache()
+    {
+        // Null and whitespace safety
+        var exNull = Record.Exception(() => KTGStateReader.InvalidateSubmittedWord(null!));
+        Assert.Null(exNull);
+        var exWhitespace = Record.Exception(() => KTGStateReader.InvalidateSubmittedWord("   "));
+        Assert.Null(exWhitespace);
+
+        // Populate test cache entries via reflection
+        var cacheField = typeof(KTGStateReader).GetField("_targetCache", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+        Assert.NotNull(cacheField);
+        var cache = (Dictionary<int, CachedTarget>)cacheField.GetValue(null)!;
+
+        lock (cache)
+        {
+            cache.Clear();
+            cache[5] = new CachedTarget { SlotId = 5, Word = "Don't", ScreenY = 500f, ScreenX = 100f, LastSeenUtc = DateTime.UtcNow };
+            cache[6] = new CachedTarget { SlotId = 6, Word = "サボテンダー！", ScreenY = 500f, ScreenX = 100f, LastSeenUtc = DateTime.UtcNow };
+            cache[7] = new CachedTarget { SlotId = 7, Word = "Airbuster", ScreenY = 500f, ScreenX = 100f, LastSeenUtc = DateTime.UtcNow };
+
+            // Invalidate "Dont" (stripping apostrophe) should match slot 5
+            KTGStateReader.InvalidateSubmittedWord("Dont");
+            Assert.False(cache.ContainsKey(5));
+            Assert.True(cache.ContainsKey(6));
+            Assert.True(cache.ContainsKey(7));
+
+            // Invalidate "サボテンダー" (stripping Japanese exclamation mark) should match slot 6
+            KTGStateReader.InvalidateSubmittedWord("サボテンダー");
+            Assert.False(cache.ContainsKey(6));
+            Assert.True(cache.ContainsKey(7));
+
+            // ClearCache empties everything
+            KTGStateReader.ClearCache();
+            Assert.Empty(cache);
+        }
+    }
+
+    [Fact]
+    public void TestKTGInputSimulator_EnqueueWord_AccentedEuropeanCharacters()
+    {
+        var sim = new KTGInputSimulator();
+        var config = new Configuration();
+
+        // German umlauts and Eszett (Grüße: 5 chars + 1 Enter = 6 actions)
+        sim.EnqueueWord("Grüße", config);
+        Assert.True(sim.IsTyping);
+        Assert.Equal("Grüße", sim.CurrentWord);
+        Assert.Equal(6, sim.RemainingChars);
+
+        // French circumflex and accent (Fête: 4 chars + 1 Enter = 5 actions)
+        sim.EnqueueWord("Fête", config);
+        Assert.True(sim.IsTyping);
+        Assert.Equal("Fête", sim.CurrentWord);
+        Assert.Equal(5, sim.RemainingChars);
+
+        // Leading and trailing whitespace is trimmed
+        sim.EnqueueWord("   Airbuster   ", config);
+        Assert.True(sim.IsTyping);
+        Assert.Equal("Airbuster", sim.CurrentWord.Trim());
+        // "Airbuster" (9 chars) + Enter (1) = 10 actions
+        Assert.Equal(10, sim.RemainingChars);
+    }
+
+    [Fact]
+    public void TestKTGWordDatabase_FindMatch_EdgeCases()
+    {
+        // When null, empty, or whitespace, FindMatch returns null immediately
+        Assert.Null(KTGWordDatabase.FindMatch(null!));
+        Assert.Null(KTGWordDatabase.FindMatch(string.Empty));
+        Assert.Null(KTGWordDatabase.FindMatch("   "));
+
+        // When database is unloaded, returns null safely without throwing
+        Assert.Null(KTGWordDatabase.FindMatch("NonExistentWord"));
+    }
+
+    [Fact]
+    public void TestKTGStateReader_IsCactuarWord()
+    {
+        // Known Cactuar prompts across client languages
+        Assert.True(KTGStateReader.IsCactuarWord("サボテンダー"));
+        Assert.True(KTGStateReader.IsCactuarWord("Cactuar"));
+        Assert.True(KTGStateReader.IsCactuarWord("Gigantender"));
+        Assert.True(KTGStateReader.IsCactuarWord("Pampa"));
+        Assert.True(KTGStateReader.IsCactuarWord("Kaktor"));
+
+        // Non-Cactuar prompts and edge cases
+        Assert.False(KTGStateReader.IsCactuarWord("Airbuster"));
+        Assert.False(KTGStateReader.IsCactuarWord("Main Cannon"));
+        Assert.False(KTGStateReader.IsCactuarWord(string.Empty));
+        Assert.False(KTGStateReader.IsCactuarWord("   "));
+        Assert.False(KTGStateReader.IsCactuarWord(null!));
+    }
+
+    [Fact]
+    public void TestKTGSafetyGuard_IsPlayerStunned_UninitializedSafeReturn()
+    {
+        // When uninitialized or Svc.Objects is null, must safely return false without throwing
+        var ex = Record.Exception(() =>
+        {
+            var stunned = KTGSafetyGuard.IsPlayerStunned();
+            Assert.False(stunned);
+        });
+        Assert.Null(ex);
+    }
 }
+
 
 

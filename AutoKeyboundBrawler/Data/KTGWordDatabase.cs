@@ -165,7 +165,7 @@ public static class KTGWordDatabase
         }
     }
 
-    private static bool DetermineIsDefense(uint rowId, string localText, string enText)
+    internal static bool DetermineIsDefense(uint rowId, string localText, string enText)
     {
         var lowerEn = enText.ToLowerInvariant();
 
@@ -182,7 +182,7 @@ public static class KTGWordDatabase
         }
 
         // Explicit defense skills / shield prompts across all languages
-        if (lowerEn.Contains("defense") || lowerEn.Contains("defend") || lowerEn.Contains("shield") ||
+        if (lowerEn.Contains("defense") || lowerEn.Contains("defensive") || lowerEn.Contains("defend") || lowerEn.Contains("shield") ||
             localText.Contains("防御") || localText.Contains("守護") || localText.Contains("シールド") ||
             localText.Contains("光の盾") || localText.Contains("ダブルガード") || localText.Contains("ジャストガード") ||
             localText.Contains("おまもりチアー") || localText.Contains("Lustrous Shield") || localText.Contains("Iron Defense"))

@@ -18,7 +18,7 @@ public class KTGAutomationManager
     }
 
     private readonly Configuration _config;
-    private readonly IPluginLog _log;
+    private readonly IPluginLog? _log;
     private readonly KTGInputSimulator _simulator = new();
     private readonly Random _rng = new();
 
@@ -49,7 +49,7 @@ public class KTGAutomationManager
                                   CurrentStatus.Contains("Queued") || CurrentStatus.Contains("Commencing") || CurrentStatus.Contains("Registration");
     public bool IsHaltStatus => CurrentStatus.StartsWith("SAFETY") || CurrentStatus.Contains("Halt") || CurrentStatus.Contains("Obstruction");
 
-    public KTGAutomationManager(Configuration config, IPluginLog log)
+    public KTGAutomationManager(Configuration config, IPluginLog? log)
     {
         _config = config;
         _log = log;
@@ -66,6 +66,8 @@ public class KTGAutomationManager
             {
                 _simulator.Clear();
             }
+            _lastTargetSlotId = -1;
+            _lastTargetWord = string.Empty;
             return;
         }
 
@@ -114,6 +116,8 @@ public class KTGAutomationManager
                 {
                     _simulator.Clear();
                 }
+                _lastTargetSlotId = -1;
+                _lastTargetWord = string.Empty;
                 KTGStateReader.ClearCache();
                 break;
         }
@@ -183,7 +187,7 @@ public class KTGAutomationManager
             _lastTargetWord = string.Empty;
             if (_simulator.IsTyping)
             {
-                _log.Warning($"[AutoKeyboundBrawler] Safety stop triggered ({safetyReason}). Halting typing simulator without sending keystrokes.");
+                _log?.Warning($"[AutoKeyboundBrawler] Safety stop triggered ({safetyReason}). Halting typing simulator without sending keystrokes.");
                 _simulator.Clear();
             }
             return;
@@ -254,7 +258,7 @@ public class KTGAutomationManager
             var tag = isDefense ? "[DEFENSE SENTENCE]" : (isNeedles ? "[CACTUAR/NEEDLES]" : (isBoss ? "[BOSS]" : "[ADD/MOB]"));
 
             CurrentStatus = $"{tag} Enqueued: \"{target.Word}\"";
-            _log.Information($"[AutoKeyboundBrawler] Target selected {tag} (Slot {target.SlotId}, ScreenY {target.ScreenY:F1}): \"{target.Word}\"");
+            _log?.Information($"[AutoKeyboundBrawler] Target selected {tag} (Slot {target.SlotId}, ScreenY {target.ScreenY:F1}): \"{target.Word}\"");
             _simulator.EnqueueWord(target.Word, _config);
         }
         else
@@ -268,7 +272,7 @@ public class KTGAutomationManager
         switch (_haltRecoveryState)
         {
             case HaltRecoveryState.SendEnter:
-                _log.Information("[AutoKeyboundBrawler] Exiting halt: pressing Enter to activate text input window...");
+                _log?.Information("[AutoKeyboundBrawler] Exiting halt: pressing Enter to activate text input window...");
                 CurrentStatus = "Halt Recovery: Activating text input (Enter)...";
                 KTGInputSimulator.SendKey(FFXIVClientStructs.FFXIV.Client.System.Input.SeVirtualKey.RETURN, _config);
                 _lastHaltRecoveryTime = DateTime.UtcNow;
@@ -286,7 +290,7 @@ public class KTGAutomationManager
                 // Window is now active. Check if leftover text needs to be cancelled.
                 if (!AddonKTGInput.IsInputEmpty())
                 {
-                    _log.Information("[AutoKeyboundBrawler] Input has cancelled text after halt. Pressing Escape to clear...");
+                    _log?.Information("[AutoKeyboundBrawler] Input has cancelled text after halt. Pressing Escape to clear...");
                     CurrentStatus = "Halt Recovery: Cancelling leftover text (Esc)...";
                     KTGInputSimulator.SendKey(FFXIVClientStructs.FFXIV.Client.System.Input.SeVirtualKey.ESCAPE, _config);
                     _lastHaltRecoveryTime = DateTime.UtcNow;
@@ -295,7 +299,7 @@ public class KTGAutomationManager
                 }
 
                 // Buffer is already empty, recovery complete!
-                _log.Information("[AutoKeyboundBrawler] Halt recovery complete (input clean). Resuming normal typing.");
+                _log?.Information("[AutoKeyboundBrawler] Halt recovery complete (input clean). Resuming normal typing.");
                 _wasInHalt = false;
                 _haltRecoveryState = HaltRecoveryState.None;
                 return false;
@@ -318,7 +322,7 @@ public class KTGAutomationManager
                     return true;
                 }
 
-                _log.Information("[AutoKeyboundBrawler] Halt recovery complete (buffer cleared). Resuming normal typing.");
+                _log?.Information("[AutoKeyboundBrawler] Halt recovery complete (buffer cleared). Resuming normal typing.");
                 _wasInHalt = false;
                 _haltRecoveryState = HaltRecoveryState.None;
                 return false;
@@ -334,6 +338,8 @@ public class KTGAutomationManager
     {
         CurrentStatus = "Minigame Finished (Results Screen)";
         if (_simulator.IsTyping) _simulator.Clear();
+        _lastTargetSlotId = -1;
+        _lastTargetWord = string.Empty;
         _wasInHalt = false;
         _haltRecoveryState = HaltRecoveryState.None;
         AddonKTGEnemyCastBar.Reset();
@@ -342,7 +348,7 @@ public class KTGAutomationManager
         if (_config.AutoLoopEnabled && IsHumanizedReady("results", _lastActionTime, 1.5f, 2.0f))
         {
             var delay = GetHumanizedDelay("results", 1.5f, 2.0f);
-            _log.Information($"[AutoKeyboundBrawler] Auto-closing results screen (waited {delay}ms)...");
+            _log?.Information($"[AutoKeyboundBrawler] Auto-closing results screen (waited {delay}ms)...");
             if (AddonKTGResult.CloseResults())
             {
                 _lastActionTime = DateTime.UtcNow;
@@ -355,6 +361,8 @@ public class KTGAutomationManager
     {
         CurrentStatus = "Duty Found (Commencing...)";
         if (_simulator.IsTyping) _simulator.Clear();
+        _lastTargetSlotId = -1;
+        _lastTargetWord = string.Empty;
         _wasInHalt = false;
         _haltRecoveryState = HaltRecoveryState.None;
         KTGStateReader.ClearCache();
@@ -362,7 +370,7 @@ public class KTGAutomationManager
         if (_config.AutoLoopEnabled && IsHumanizedReady("commence", _lastActionTime, 0.8f, 1.2f))
         {
             var delay = GetHumanizedDelay("commence", 0.8f, 1.2f);
-            _log.Information($"[AutoKeyboundBrawler] Duty popped! Auto-commencing (waited {delay}ms)...");
+            _log?.Information($"[AutoKeyboundBrawler] Duty popped! Auto-commencing (waited {delay}ms)...");
             if (AddonContentsFinderConfirm.CommenceDuty())
             {
                 _lastActionTime = DateTime.UtcNow;
@@ -375,6 +383,8 @@ public class KTGAutomationManager
     {
         CurrentStatus = "In Keybound Square (Queued for match...)";
         if (_simulator.IsTyping) _simulator.Clear();
+        _lastTargetSlotId = -1;
+        _lastTargetWord = string.Empty;
         _wasInHalt = false;
         _haltRecoveryState = HaltRecoveryState.None;
         KTGStateReader.ClearCache();
@@ -396,6 +406,8 @@ public class KTGAutomationManager
 
         CurrentStatus = "Registration Window Open";
         if (_simulator.IsTyping) _simulator.Clear();
+        _lastTargetSlotId = -1;
+        _lastTargetWord = string.Empty;
         _wasInHalt = false;
         _haltRecoveryState = HaltRecoveryState.None;
         KTGStateReader.ClearCache();
@@ -403,7 +415,7 @@ public class KTGAutomationManager
         if (_config.AutoLoopEnabled && IsHumanizedReady("register", _lastActionTime, 0.5f, 0.9f))
         {
             var delay = GetHumanizedDelay("register", 0.5f, 0.9f);
-            _log.Information($"[AutoKeyboundBrawler] Auto-confirming registration (waited {delay}ms)...");
+            _log?.Information($"[AutoKeyboundBrawler] Auto-confirming registration (waited {delay}ms)...");
             if (AddonKTGEnterDialogue.ConfirmRegistration())
             {
                 _lastActionTime = DateTime.UtcNow;
@@ -417,6 +429,8 @@ public class KTGAutomationManager
     private void HandleInSquarePhase()
     {
         if (_simulator.IsTyping) _simulator.Clear();
+        _lastTargetSlotId = -1;
+        _lastTargetWord = string.Empty;
         _wasInHalt = false;
         _haltRecoveryState = HaltRecoveryState.None;
         KTGStateReader.ClearCache();

@@ -12,9 +12,17 @@ public static unsafe class AddonKTGEWord
 
     public static bool TryGet(out AtkUnitBase* addon)
     {
-        return GenericHelpers.TryGetAddonByName(AddonName, out addon) &&
-               addon != null &&
-               addon->IsVisible;
+        try
+        {
+            return GenericHelpers.TryGetAddonByName(AddonName, out addon) &&
+                   addon != null &&
+                   addon->IsVisible;
+        }
+        catch
+        {
+            addon = null;
+            return false;
+        }
     }
 
     /// <summary>
