@@ -69,14 +69,15 @@ public static unsafe class KTGStateReader
         }
 
         // 2. Check Dalamud Condition flags
-        if (Svc.Condition[ConditionFlag.InDutyQueue] ||
+        if (Svc.Condition != null && (
+            Svc.Condition[ConditionFlag.InDutyQueue] ||
             Svc.Condition[ConditionFlag.WaitingForDuty] ||
             Svc.Condition[ConditionFlag.WaitingForDutyFinder] ||
             Svc.Condition[ConditionFlag.WaitingForRaceOrMatch] ||
             Svc.Condition[ConditionFlag.RegisteringForRaceOrMatch] ||
             Svc.Condition[ConditionFlag.WaitingForTripleTriadMatch] ||
             Svc.Condition[ConditionFlag.WaitingForTripleTriadMatch83] ||
-            Svc.Condition[ConditionFlag.RegisteringForTripleTriadMatch])
+            Svc.Condition[ConditionFlag.RegisteringForTripleTriadMatch]))
         {
             return true;
         }

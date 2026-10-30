@@ -69,10 +69,16 @@ public class Configuration : IPluginConfiguration
         AbortForDefense = true;
         MemoryModeObscured = true;
 
-        // Automatically sync AutoLoopEnabled if sub-flags are already true
         if (AutoTalkRegistrar && AutoConfirmRegister)
         {
             AutoLoopEnabled = true;
+        }
+        else if (!AutoLoopEnabled)
+        {
+            AutoTalkRegistrar = false;
+            AutoConfirmRegister = false;
+            AutoCommenceDuty = false;
+            AutoLeaveResults = false;
         }
 
         Enabled = MinigameAutoplay || AutoLoopEnabled;

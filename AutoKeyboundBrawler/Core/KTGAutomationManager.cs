@@ -339,7 +339,7 @@ public class KTGAutomationManager
         AddonKTGEnemyCastBar.Reset();
         KTGStateReader.ClearCache();
 
-        if ((_config.AutoLeaveResults || _config.AutoLoopEnabled) && IsHumanizedReady("results", _lastActionTime, 1.5f, 2.0f))
+        if (_config.AutoLoopEnabled && IsHumanizedReady("results", _lastActionTime, 1.5f, 2.0f))
         {
             var delay = GetHumanizedDelay("results", 1.5f, 2.0f);
             _log.Information($"[AutoKeyboundBrawler] Auto-closing results screen (waited {delay}ms)...");
@@ -359,7 +359,7 @@ public class KTGAutomationManager
         _haltRecoveryState = HaltRecoveryState.None;
         KTGStateReader.ClearCache();
 
-        if ((_config.AutoConfirmRegister || _config.AutoCommenceDuty || _config.AutoLoopEnabled) && IsHumanizedReady("commence", _lastActionTime, 0.8f, 1.2f))
+        if (_config.AutoLoopEnabled && IsHumanizedReady("commence", _lastActionTime, 0.8f, 1.2f))
         {
             var delay = GetHumanizedDelay("commence", 0.8f, 1.2f);
             _log.Information($"[AutoKeyboundBrawler] Duty popped! Auto-commencing (waited {delay}ms)...");
@@ -400,7 +400,7 @@ public class KTGAutomationManager
         _haltRecoveryState = HaltRecoveryState.None;
         KTGStateReader.ClearCache();
 
-        if ((_config.AutoConfirmRegister || _config.AutoLoopEnabled) && IsHumanizedReady("register", _lastActionTime, 0.5f, 0.9f))
+        if (_config.AutoLoopEnabled && IsHumanizedReady("register", _lastActionTime, 0.5f, 0.9f))
         {
             var delay = GetHumanizedDelay("register", 0.5f, 0.9f);
             _log.Information($"[AutoKeyboundBrawler] Auto-confirming registration (waited {delay}ms)...");
@@ -440,6 +440,12 @@ public class KTGAutomationManager
 
         CurrentStatus = "In Keybound Square";
 
+        // If AFK Loop is not enabled, do not interact with NPCs or advance dialogues in the Square
+        if (!_config.AutoLoopEnabled)
+        {
+            return;
+        }
+
         // 3. Advance NPC talk dialog if open (with humanized read delay)
         unsafe
         {
@@ -456,11 +462,6 @@ public class KTGAutomationManager
                 }
                 return;
             }
-        }
-
-        if (!_config.AutoTalkRegistrar && !_config.AutoLoopEnabled)
-        {
-            return;
         }
 
         // Humanized throttle for NPC interaction

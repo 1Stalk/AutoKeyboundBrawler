@@ -38,12 +38,13 @@ public static unsafe class KTGAntiAfk
             return false;
         }
 
-        // Only keep-alive when inside Keybound Brawler duty or actively auto-looping in square
-        if (KTGSafetyGuard.IsInEventDuty && config.MinigameAutoplay)
+        // Inside Keybound Brawler duty: keep-alive if either Typing Solver or AFK Loop is active
+        if (KTGSafetyGuard.IsInEventDuty && (config.MinigameAutoplay || config.AutoLoopEnabled))
         {
             return true;
         }
 
+        // In Keybound Square: only keep-alive if AFK Loop is active
         if (KTGSafetyGuard.IsInKeyboundSquare && config.AutoLoopEnabled)
         {
             return true;

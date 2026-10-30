@@ -471,19 +471,30 @@ public class CoreTests
 
             // Case 2: Inside Keybound Brawler Duty
             KTGSafetyGuard.SetTerritoryOverridesForTesting(inDuty: true, inSquare: false);
+            // With MinigameAutoplay=true and AutoLoopEnabled=false: keepalive in duty
+            config.MinigameAutoplay = true;
+            config.AutoLoopEnabled = false;
             Assert.True(KTGAntiAfk.ShouldKeepAlive(config));
 
+            // With MinigameAutoplay=false and AutoLoopEnabled=true: keepalive in duty
             config.MinigameAutoplay = false;
+            config.AutoLoopEnabled = true;
+            Assert.True(KTGAntiAfk.ShouldKeepAlive(config));
+
+            // With both false: no keepalive in duty
+            config.MinigameAutoplay = false;
+            config.AutoLoopEnabled = false;
             Assert.False(KTGAntiAfk.ShouldKeepAlive(config));
-            config.MinigameAutoplay = true;
 
             // Case 3: In Keybound Square with AutoLoop active
             KTGSafetyGuard.SetTerritoryOverridesForTesting(inDuty: false, inSquare: true);
             config.AutoLoopEnabled = true;
+            config.MinigameAutoplay = false;
             Assert.True(KTGAntiAfk.ShouldKeepAlive(config));
 
-            // Case 4: In Keybound Square but AutoLoop is disabled
+            // Case 4: In Keybound Square but AutoLoop is disabled (even if MinigameAutoplay is true)
             config.AutoLoopEnabled = false;
+            config.MinigameAutoplay = true;
             Assert.False(KTGAntiAfk.ShouldKeepAlive(config));
 
             // Case 5: Master Enabled is false
@@ -725,6 +736,74 @@ public class CoreTests
         Assert.True(config.RequireWindowFocus);
         config.Initialize(null!);
         Assert.True(config.RequireWindowFocus);
+    }
+
+    [Fact]
+    public void TestKTGAutomationManager_TypingSolverOnlyDoesNotInterfereInSquare()
+    {
+        try
+        {
+            var config = new Configuration
+            {
+                Enabled = true,
+                MinigameAutoplay = true,
+                AutoLoopEnabled = false
+            };
+
+            // In Square: MinigameAutoplay=true must not trigger keep-alive
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(inDuty: false, inSquare: true);
+            Assert.False(KTGAntiAfk.ShouldKeepAlive(config));
+
+            var manager = new KTGAutomationManager(config, null!);
+            manager.Tick();
+
+            // Status is square, but loop automation and typing are not active
+            Assert.Equal("In Keybound Square", manager.CurrentStatus);
+            Assert.Equal(EventPhase.InSquare, manager.CurrentPhase);
+            Assert.False(manager.IsTyping);
+
+            // In Duty: MinigameAutoplay=true DOES trigger keep-alive
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(inDuty: true, inSquare: false);
+            Assert.True(KTGAntiAfk.ShouldKeepAlive(config));
+        }
+        finally
+        {
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(null, null);
+        }
+    }
+
+    [Fact]
+    public void TestKTGAutomationManager_AfkLoopOnlyKeepsAliveInDuty()
+    {
+        try
+        {
+            var config = new Configuration
+            {
+                Enabled = true,
+                MinigameAutoplay = false,
+                AutoLoopEnabled = true
+            };
+
+            // In Duty: AutoLoopEnabled=true triggers keep-alive even when MinigameAutoplay=false
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(inDuty: true, inSquare: false);
+            Assert.True(KTGAntiAfk.ShouldKeepAlive(config));
+
+            var manager = new KTGAutomationManager(config, null!);
+            manager.Tick();
+
+            // In duty, minigame phase does not type when MinigameAutoplay is false
+            Assert.Equal("Minigame Autoplay Disabled", manager.CurrentStatus);
+            Assert.Equal(EventPhase.InMinigame, manager.CurrentPhase);
+            Assert.False(manager.IsTyping);
+
+            // In Square: AutoLoopEnabled=true also triggers keep-alive
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(inDuty: false, inSquare: true);
+            Assert.True(KTGAntiAfk.ShouldKeepAlive(config));
+        }
+        finally
+        {
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(null, null);
+        }
     }
 }
 

@@ -47,10 +47,18 @@ public static unsafe class AddonKTGEnemyCastBar
 
     public static bool TryGetCastBar(out AtkUnitBase* addon)
     {
-        return (GenericHelpers.TryGetAddonByName(CastBarAddonName, out addon) ||
-                GenericHelpers.TryGetAddonByName(LegacyCastBarAddonName, out addon)) &&
-               addon != null &&
-               addon->IsVisible;
+        try
+        {
+            return (GenericHelpers.TryGetAddonByName(CastBarAddonName, out addon) ||
+                    GenericHelpers.TryGetAddonByName(LegacyCastBarAddonName, out addon)) &&
+                   addon != null &&
+                   addon->IsVisible;
+        }
+        catch
+        {
+            addon = null;
+            return false;
+        }
     }
 
     public static List<KTGActiveCast> ReadActiveCasts()
