@@ -33,6 +33,11 @@ public static unsafe class KTGAntiAfk
             return false;
         }
 
+        if (!config.MinigameAutoplay && !config.AutoLoopEnabled)
+        {
+            return false;
+        }
+
         // Only keep-alive when inside Keybound Brawler duty or actively auto-looping in square
         if (KTGSafetyGuard.IsInEventDuty && config.MinigameAutoplay)
         {
@@ -50,7 +55,7 @@ public static unsafe class KTGAntiAfk
     public static void KeepAlive(Configuration? config = null, bool force = false)
     {
         config ??= Plugin.Configuration;
-        if (!force && config != null && !ShouldKeepAlive(config))
+        if (!force && (config == null || !ShouldKeepAlive(config)))
         {
             return;
         }

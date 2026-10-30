@@ -57,11 +57,10 @@ public class KTGAutomationManager
 
     public void Tick()
     {
-        CurrentPhase = KTGStateReader.GetCurrentPhase();
-
-        var isActive = _config.MinigameAutoplay || _config.AutoLoopEnabled || _config.Enabled;
+        var isActive = _config.Enabled && (_config.MinigameAutoplay || _config.AutoLoopEnabled);
         if (!isActive)
         {
+            CurrentPhase = EventPhase.None;
             CurrentStatus = "Idle (Automation paused)";
             if (_simulator.IsTyping)
             {
@@ -69,6 +68,8 @@ public class KTGAutomationManager
             }
             return;
         }
+
+        CurrentPhase = KTGStateReader.GetCurrentPhase();
 
         if (!KTGWordDatabase.IsLoaded || KTGWordDatabase.CurrentLanguage != Svc.ClientState.ClientLanguage)
         {

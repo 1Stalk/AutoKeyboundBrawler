@@ -637,5 +637,94 @@ public class CoreTests
             Plugin.Configuration = null!;
         }
     }
+
+    [Fact]
+    public void TestKTGAntiAfk_IdleModeWhenNeitherCheckboxActive()
+    {
+        try
+        {
+            var config = new Configuration
+            {
+                Enabled = true,
+                MinigameAutoplay = false,
+                AutoLoopEnabled = false
+            };
+
+            // 1. Inside Duty: when both checkboxes false, ShouldKeepAlive is false
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(inDuty: true, inSquare: false);
+            Assert.False(KTGAntiAfk.ShouldKeepAlive(config));
+
+            // 2. In Square: when both checkboxes false, ShouldKeepAlive is false
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(inDuty: false, inSquare: true);
+            Assert.False(KTGAntiAfk.ShouldKeepAlive(config));
+
+            // 3. When Enabled is false: ShouldKeepAlive is false even if individual checkboxes are true
+            config.MinigameAutoplay = true;
+            config.AutoLoopEnabled = true;
+            config.Enabled = false;
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(inDuty: true, inSquare: false);
+            Assert.False(KTGAntiAfk.ShouldKeepAlive(config));
+
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(inDuty: false, inSquare: true);
+            Assert.False(KTGAntiAfk.ShouldKeepAlive(config));
+
+            // 4. KeepAlive with idle config returns safely without throwing or executing
+            config.Enabled = true;
+            config.MinigameAutoplay = false;
+            config.AutoLoopEnabled = false;
+            var ex = Record.Exception(() => KTGAntiAfk.KeepAlive(config));
+            Assert.Null(ex);
+        }
+        finally
+        {
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(null, null);
+        }
+    }
+
+    [Fact]
+    public void TestKTGAutomationManager_IdleModeWhenNeitherCheckboxActive()
+    {
+        var config = new Configuration
+        {
+            Enabled = true,
+            MinigameAutoplay = false,
+            AutoLoopEnabled = false
+        };
+
+        var manager = new KTGAutomationManager(config, null!);
+
+        // Call Tick when neither checkbox is active
+        manager.Tick();
+
+        // Must enter idle mode and not interfere
+        Assert.Equal("Idle (Automation paused)", manager.CurrentStatus);
+        Assert.Equal(EventPhase.None, manager.CurrentPhase);
+        Assert.False(manager.IsTyping);
+        Assert.False(manager.IsInDutyPhase);
+        Assert.False(manager.IsInQueuePhase);
+        Assert.False(manager.IsHaltStatus);
+    }
+
+    [Fact]
+    public void TestMainWindow_OriginalDimensionsAndFocusSafety()
+    {
+        var flags = System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static;
+        var defaultSizeField = typeof(AutoKeyboundBrawler.UI.MainWindow).GetField("DefaultSize", flags);
+        Assert.NotNull(defaultSizeField);
+        var defaultSize = (System.Numerics.Vector2)defaultSizeField.GetValue(null)!;
+        Assert.Equal(280f, defaultSize.X);
+        Assert.Equal(290f, defaultSize.Y);
+
+        var constraintsField = typeof(AutoKeyboundBrawler.UI.MainWindow).GetField("ExpandedConstraints", flags);
+        Assert.NotNull(constraintsField);
+        var constraints = (Dalamud.Interface.Windowing.WindowSizeConstraints)constraintsField.GetValue(null)!;
+        Assert.Equal(480f, constraints.MaximumSize.Y);
+
+        // Verify background focus safety remains active by default
+        var config = new Configuration();
+        Assert.True(config.RequireWindowFocus);
+        config.Initialize(null!);
+        Assert.True(config.RequireWindowFocus);
+    }
 }
 

@@ -74,6 +74,8 @@ public class Configuration : IPluginConfiguration
         {
             AutoLoopEnabled = true;
         }
+
+        Enabled = MinigameAutoplay || AutoLoopEnabled;
     }
 
     public void SetMinigameAutoplay(bool val)

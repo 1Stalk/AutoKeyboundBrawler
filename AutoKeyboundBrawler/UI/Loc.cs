@@ -87,21 +87,6 @@ public static class Loc
             ("AutoOpenRegTip", ClientLanguage.French) => "Ouvre automatiquement cette interface lorsque vous vous approchez de la préposée.",
             ("AutoOpenRegTip", _) => "Automatically opens this interface whenever you approach the Keybound Registrar NPC.",
 
-            ("RequireFocus", ClientLanguage.Japanese) => "フォーカス時のみ入力",
-            ("RequireFocus", ClientLanguage.German) => "Nur bei Spielfokus",
-            ("RequireFocus", ClientLanguage.French) => "Verrouillage focus jeu",
-            ("RequireFocus", _) => "Lock to Game Window",
-
-            ("RequireFocusSub", ClientLanguage.Japanese) => "FFXIVが非アクティブ時は入力を完全停止",
-            ("RequireFocusSub", ClientLanguage.German) => "Stoppt Tastatureingaben außerhalb des Spiels",
-            ("RequireFocusSub", ClientLanguage.French) => "Bloque la saisie si le jeu est inactif",
-            ("RequireFocusSub", _) => "Block inputs when FFXIV is unfocused",
-
-            ("RequireFocusTip", ClientLanguage.Japanese) => "Discordやブラウザを操作している間、文字がゲーム外に誤送信されるのを防ぎます。",
-            ("RequireFocusTip", ClientLanguage.German) => "Verhindert die Tastatureingabe in Discord oder Webseiten, wenn das Spiel im Hintergrund läuft.",
-            ("RequireFocusTip", ClientLanguage.French) => "Empêche la saisie dans Discord ou le navigateur lorsque FFXIV est en arrière-plan.",
-            ("RequireFocusTip", _) => "Prevents simulated keystrokes from spilling into Discord or web browsers when FFXIV is not the active window.",
-
             ("IgnorePunct", ClientLanguage.Japanese) => "句読点・記号の省略",
             ("IgnorePunct", ClientLanguage.German) => "Satzzeichen ignorieren",
             ("IgnorePunct", ClientLanguage.French) => "Ignorer la ponctuation",
