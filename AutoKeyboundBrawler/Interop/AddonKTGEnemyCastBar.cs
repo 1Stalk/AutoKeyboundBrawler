@@ -240,49 +240,56 @@ public static unsafe class AddonKTGEnemyCastBar
 
     private static bool CheckAddonForPredicate(string addonName, Func<string, bool> predicate)
     {
-        if (!GenericHelpers.TryGetAddonByName(addonName, out AtkUnitBase* addon) ||
-            addon == null ||
-            !addon->IsVisible ||
-            !addon->IsReady)
+        try
         {
-            return false;
-        }
-
-        for (var i = 0; i < addon->UldManager.NodeListCount; i++)
-        {
-            var node = addon->UldManager.NodeList[i];
-            if (node == null || !GUINodeUtils.IsNodeActuallyVisible(node)) continue;
-
-            if (node->Type == NodeType.Text)
+            if (!GenericHelpers.TryGetAddonByName(addonName, out AtkUnitBase* addon) ||
+                addon == null ||
+                !addon->IsVisible ||
+                !addon->IsReady)
             {
-                var text = GUINodeUtils.GetNodeText(node);
-                if (!string.IsNullOrEmpty(text) && predicate(text))
-                {
-                    return true;
-                }
+                return false;
             }
-            else if ((int)node->Type >= 1000)
+
+            for (var i = 0; i < addon->UldManager.NodeListCount; i++)
             {
-                var comp = (AtkComponentNode*)node;
-                if (comp->Component != null)
+                var node = addon->UldManager.NodeList[i];
+                if (node == null || !GUINodeUtils.IsNodeActuallyVisible(node)) continue;
+
+                if (node->Type == NodeType.Text)
                 {
-                    for (var j = 0; j < comp->Component->UldManager.NodeListCount; j++)
+                    var text = GUINodeUtils.GetNodeText(node);
+                    if (!string.IsNullOrEmpty(text) && predicate(text))
                     {
-                        var child = comp->Component->UldManager.NodeList[j];
-                        if (child != null && child->Type == NodeType.Text && GUINodeUtils.IsNodeActuallyVisible(child, node))
+                        return true;
+                    }
+                }
+                else if ((int)node->Type >= 1000)
+                {
+                    var comp = (AtkComponentNode*)node;
+                    if (comp->Component != null)
+                    {
+                        for (var j = 0; j < comp->Component->UldManager.NodeListCount; j++)
                         {
-                            var text = GUINodeUtils.GetNodeText(child);
-                            if (!string.IsNullOrEmpty(text) && predicate(text))
+                            var child = comp->Component->UldManager.NodeList[j];
+                            if (child != null && child->Type == NodeType.Text && GUINodeUtils.IsNodeActuallyVisible(child, node))
                             {
-                                return true;
+                                var text = GUINodeUtils.GetNodeText(child);
+                                if (!string.IsNullOrEmpty(text) && predicate(text))
+                                {
+                                    return true;
+                                }
                             }
                         }
                     }
                 }
             }
-        }
 
-        return false;
+            return false;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private record ActiveHaltCast(string SpellName, float CurrentCastTime, float TotalCastTime, float RemainingCastTime);

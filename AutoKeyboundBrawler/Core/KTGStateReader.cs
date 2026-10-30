@@ -117,6 +117,19 @@ public static unsafe class KTGStateReader
             return EventPhase.InSquare;
         }
 
+        // If outside duty and near registrar, allow square automation to operate
+        try
+        {
+            if (KTGLocalizationRegistry.FindNearbyRegistrar(12.0f, out _) != null)
+            {
+                return EventPhase.InSquare;
+            }
+        }
+        catch
+        {
+            // Objects unavailable
+        }
+
         return EventPhase.None;
     }
 

@@ -61,6 +61,7 @@ public static class KTGLocalizationRegistry
     public static IGameObject? FindNearbyRegistrar(float maxDistance, out float distance)
     {
         distance = float.MaxValue;
+        if (Svc.Objects == null) return null;
         var localPlayer = Svc.Objects.LocalPlayer;
         if (localPlayer == null) return null;
 
@@ -69,7 +70,7 @@ public static class KTGLocalizationRegistry
         var minDistance = float.MaxValue;
 
         // Fast path: Current target is already Keybound Registrar and within interact range
-        var target = Svc.Targets.Target;
+        var target = Svc.Targets?.Target;
         if (target != null && IsRegistrar(target))
         {
             var d = Vector3.Distance(playerPos, target.Position);

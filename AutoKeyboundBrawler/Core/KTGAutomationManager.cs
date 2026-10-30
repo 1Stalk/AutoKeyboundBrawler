@@ -447,21 +447,28 @@ public class KTGAutomationManager
         }
 
         // 3. Advance NPC talk dialog if open (with humanized read delay)
-        unsafe
+        try
         {
-            if (ECommons.GenericHelpers.TryGetAddonByName("Talk", out FFXIVClientStructs.FFXIV.Component.GUI.AtkUnitBase* talk) &&
-                talk != null &&
-                talk->IsVisible &&
-                talk->IsReady)
+            unsafe
             {
-                if (IsHumanizedReady("talk", _lastActionTime, 0.3f, 0.6f))
+                if (ECommons.GenericHelpers.TryGetAddonByName("Talk", out FFXIVClientStructs.FFXIV.Component.GUI.AtkUnitBase* talk) &&
+                    talk != null &&
+                    talk->IsVisible &&
+                    talk->IsReady)
                 {
-                    ECommons.Automation.Callback.Fire(talk, true, 0);
-                    _lastActionTime = DateTime.UtcNow;
-                    ConsumeHumanizedDelay("talk");
+                    if (IsHumanizedReady("talk", _lastActionTime, 0.3f, 0.6f))
+                    {
+                        ECommons.Automation.Callback.Fire(talk, true, 0);
+                        _lastActionTime = DateTime.UtcNow;
+                        ConsumeHumanizedDelay("talk");
+                    }
+                    return;
                 }
-                return;
             }
+        }
+        catch
+        {
+            // UI or GameGui unavailable
         }
 
         // Humanized throttle for NPC interaction
@@ -470,8 +477,14 @@ public class KTGAutomationManager
             return;
         }
 
-        if (Svc.Condition[Dalamud.Game.ClientState.Conditions.ConditionFlag.OccupiedInEvent] ||
-            Svc.Condition[Dalamud.Game.ClientState.Conditions.ConditionFlag.BetweenAreas])
+        if (Svc.Condition != null && (
+            Svc.Condition[Dalamud.Game.ClientState.Conditions.ConditionFlag.OccupiedInEvent] ||
+            Svc.Condition[Dalamud.Game.ClientState.Conditions.ConditionFlag.BetweenAreas]))
+        {
+            return;
+        }
+
+        if (Svc.Objects == null)
         {
             return;
         }
@@ -492,7 +505,7 @@ public class KTGAutomationManager
         }
 
         // Step 1: Ensure registrar is actively targeted first
-        if (Svc.Targets.Target?.Address != registrar.Address)
+        if (Svc.Targets != null && Svc.Targets.Target?.Address != registrar.Address)
         {
             Svc.Targets.Target = registrar;
             CurrentStatus = "In Keybound Square (Targeting Registrar...)";
@@ -500,14 +513,25 @@ public class KTGAutomationManager
         }
 
         // Step 2: Interact with targeted NPC
-        unsafe
+        try
         {
-            FFXIVClientStructs.FFXIV.Client.Game.Control.TargetSystem.Instance()->InteractWithObject((FFXIVClientStructs.FFXIV.Client.Game.Object.GameObject*)registrar.Address, false);
+            unsafe
+            {
+                var targetSystem = FFXIVClientStructs.FFXIV.Client.Game.Control.TargetSystem.Instance();
+                if (targetSystem != null)
+                {
+                    targetSystem->InteractWithObject((FFXIVClientStructs.FFXIV.Client.Game.Object.GameObject*)registrar.Address, false);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _log?.Verbose(ex, "[AutoKeyboundBrawler] InteractWithObject threw");
         }
 
         var delayInteract = GetHumanizedDelay("npcInteract", 1.0f, 1.5f);
         CurrentStatus = "In Keybound Square (Interacting with Registrar...)";
-        _log.Information($"[AutoKeyboundBrawler] Auto-interacted with Keybound Registrar (waited {delayInteract}ms).");
+        _log?.Information($"[AutoKeyboundBrawler] Auto-interacted with Keybound Registrar (waited {delayInteract}ms).");
         _lastActionTime = DateTime.UtcNow;
         ConsumeHumanizedDelay("npcInteract");
     }
