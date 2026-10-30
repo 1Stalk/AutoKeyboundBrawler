@@ -2,6 +2,7 @@ using AutoKeyboundBrawler.Core;
 using AutoKeyboundBrawler.Data;
 using AutoKeyboundBrawler.UI;
 using Dalamud.Game.Command;
+using Dalamud.Interface;
 using Dalamud.Interface.Windowing;
 using Dalamud.Plugin;
 using Dalamud.Plugin.Services;
@@ -52,6 +53,7 @@ public sealed class Plugin : IDalamudPlugin
         _pluginInterface.UiBuilder.Draw += DrawUI;
         _pluginInterface.UiBuilder.OpenConfigUi += ToggleUI;
         _pluginInterface.UiBuilder.OpenMainUi += ToggleUI;
+        ConfigureUiBuilder(_pluginInterface.UiBuilder);
 
         // Commands
         var commandInfo = new CommandInfo(OnCommand)
@@ -172,6 +174,13 @@ public sealed class Plugin : IDalamudPlugin
         }
 
         return false;
+    }
+
+    internal static void ConfigureUiBuilder(IUiBuilder uiBuilder)
+    {
+        if (uiBuilder == null) return;
+        uiBuilder.DisableCutsceneUiHide = true;
+        uiBuilder.DisableAutomaticUiHide = true;
     }
 
     public void OpenUI()

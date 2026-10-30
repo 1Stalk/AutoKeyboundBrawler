@@ -1594,6 +1594,95 @@ public class CoreTests
         });
         Assert.Null(ex);
     }
+
+    public class TestUiBuilderProxy : System.Reflection.DispatchProxy
+    {
+        public readonly Dictionary<string, object?> PropertyValues = new();
+
+        protected override object? Invoke(System.Reflection.MethodInfo? targetMethod, object?[]? args)
+        {
+            if (targetMethod == null) return null;
+            if (targetMethod.Name.StartsWith("set_") && args != null && args.Length == 1)
+            {
+                var propName = targetMethod.Name.Substring(4);
+                PropertyValues[propName] = args[0];
+                return null;
+            }
+            if (targetMethod.Name.StartsWith("get_"))
+            {
+                var propName = targetMethod.Name.Substring(4);
+                if (PropertyValues.TryGetValue(propName, out var val))
+                    return val;
+                if (targetMethod.ReturnType.IsValueType)
+                    return Activator.CreateInstance(targetMethod.ReturnType);
+                return null;
+            }
+            return null;
+        }
+    }
+
+    [Fact]
+    public void TestConfigureUiBuilder_SetsCutsceneAndAutomaticHide()
+    {
+        var proxy = System.Reflection.DispatchProxy.Create<Dalamud.Interface.IUiBuilder, TestUiBuilderProxy>();
+        Plugin.ConfigureUiBuilder(proxy);
+        Assert.True(proxy.DisableCutsceneUiHide);
+        Assert.True(proxy.DisableAutomaticUiHide);
+    }
+
+    [Fact]
+    public void TestConfigureUiBuilder_NullSafety()
+    {
+        var ex = Record.Exception(() => Plugin.ConfigureUiBuilder(null!));
+        Assert.Null(ex);
+    }
+
+    [Fact]
+    public void TestPluginConstructor_CallsConfigureUiBuilder()
+    {
+        var cecilAsm = System.Reflection.Assembly.LoadFrom(System.IO.Path.Combine(System.AppContext.BaseDirectory, "Mono.Cecil.dll"));
+        using var module = (IDisposable)cecilAsm.GetType("Mono.Cecil.ModuleDefinition")!.GetMethod("ReadModule", new[] { typeof(string) })!.Invoke(null, new object[] { typeof(Plugin).Assembly.Location })!;
+        dynamic dynamicModule = module;
+        dynamic pluginDef = dynamicModule.GetType("AutoKeyboundBrawler.Plugin");
+        dynamic ctor = ((System.Collections.IEnumerable)pluginDef.Methods).Cast<dynamic>().First(m => (string)m.Name == ".ctor");
+        bool callsConfigureUiBuilder = false;
+        foreach (dynamic inst in ctor.Body.Instructions)
+        {
+            var operand = inst.Operand?.ToString() ?? "";
+            if (operand.Contains("ConfigureUiBuilder"))
+            {
+                callsConfigureUiBuilder = true;
+                break;
+            }
+        }
+        Assert.True(callsConfigureUiBuilder, "Plugin constructor must call ConfigureUiBuilder");
+    }
+
+    [Theory]
+    [InlineData(true, false, false, false)] // Loading screen (GameUiHidden), default Dalamud toggles
+    [InlineData(true, false, true, false)]  // Loading screen, Dalamud ToggleUiHide=true
+    [InlineData(false, true, false, false)] // Cutscene, default Dalamud toggles
+    [InlineData(false, true, false, true)]  // Cutscene, Dalamud ToggleUiHideDuringCutscenes=true
+    [InlineData(true, true, true, true)]    // Loading + Cutscene, all Dalamud hide toggles enabled
+    public void TestUiBuilderDrawLogic_CutsceneAndLoadingNeverHidden(
+        bool gameUiHidden, bool cutsceneActive, bool toggleUiHide, bool toggleUiHideDuringCutscenes)
+    {
+        var proxy = System.Reflection.DispatchProxy.Create<Dalamud.Interface.IUiBuilder, TestUiBuilderProxy>();
+        Plugin.ConfigureUiBuilder(proxy);
+
+        // Evaluate Dalamud's exact UiBuilder.OnDraw hiding logic decompiled from IL:
+        bool isHidden = false;
+        if (gameUiHidden && toggleUiHide && !proxy.DisableUserUiHide && !proxy.DisableAutomaticUiHide)
+        {
+            isHidden = true;
+        }
+        else if (cutsceneActive && toggleUiHideDuringCutscenes && !proxy.DisableCutsceneUiHide && !proxy.DisableAutomaticUiHide)
+        {
+            isHidden = true;
+        }
+
+        Assert.False(isHidden, "Plugin UI must not be hidden during cutscenes or loadings under any Dalamud config setting");
+    }
 }
 
 
