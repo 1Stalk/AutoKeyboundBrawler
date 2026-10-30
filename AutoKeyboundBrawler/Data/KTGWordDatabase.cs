@@ -4,8 +4,8 @@ using Lumina.Excel.Sheets;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
+using System.Text.RegularExpressions;
 
 namespace AutoKeyboundBrawler.Data;
 
@@ -30,6 +30,11 @@ public static class KTGWordDatabase
     private static readonly ConcurrentDictionary<string, WordEntry> ByExactMatch = new(StringComparer.OrdinalIgnoreCase);
     private static readonly ConcurrentDictionary<string, WordEntry> ByStrippedMatch = new(StringComparer.OrdinalIgnoreCase);
 
+    public static WordEntry? GetByRowId(uint rowId)
+    {
+        return ByRowId.TryGetValue(rowId, out var entry) ? entry : null;
+    }
+
     public static bool Load(IDataManager? data, IPluginLog? log = null)
     {
         if (data == null) return false;
@@ -50,10 +55,10 @@ public static class KTGWordDatabase
                 ? data.GetExcelSheet<KTGTypeWordTextData>(ClientLanguage.English)
                 : sheet;
 
-            Entries.Clear();
-            ByRowId.Clear();
-            ByExactMatch.Clear();
-            ByStrippedMatch.Clear();
+            var newEntries = new List<WordEntry>();
+            var newByRowId = new ConcurrentDictionary<uint, WordEntry>();
+            var newByExactMatch = new ConcurrentDictionary<string, WordEntry>(StringComparer.OrdinalIgnoreCase);
+            var newByStrippedMatch = new ConcurrentDictionary<string, WordEntry>(StringComparer.OrdinalIgnoreCase);
 
             foreach (var row in sheet)
             {
@@ -109,31 +114,47 @@ public static class KTGWordDatabase
                     IsCactuar = isCactuar
                 };
 
-                Entries.Add(entry);
-                ByRowId.TryAdd(entry.RowId, entry);
-                ByExactMatch.TryAdd(normalized, entry);
-                ByStrippedMatch.TryAdd(stripped, entry);
+                newEntries.Add(entry);
+                newByRowId.TryAdd(entry.RowId, entry);
+                newByExactMatch.TryAdd(normalized, entry);
+                newByStrippedMatch.TryAdd(stripped, entry);
 
                 // Index wave dash (U+301C) alternate if fullwidth tilde (U+FF5E) is present
                 if (normalized.Contains('\uFF5E'))
                 {
-                    ByExactMatch.TryAdd(normalized.Replace('\uFF5E', '\u301C'), entry);
+                    newByExactMatch.TryAdd(normalized.Replace('\uFF5E', '\u301C'), entry);
                 }
 
                 if (!string.IsNullOrWhiteSpace(reading))
                 {
                     var normReading = reading.ToLowerInvariant();
-                    ByExactMatch.TryAdd(normReading, entry);
-                    ByStrippedMatch.TryAdd(StripPunctuation(normReading), entry);
+                    newByExactMatch.TryAdd(normReading, entry);
+                    newByStrippedMatch.TryAdd(StripPunctuation(normReading), entry);
                     if (normReading.Contains('\uFF5E'))
                     {
-                        ByExactMatch.TryAdd(normReading.Replace('\uFF5E', '\u301C'), entry);
+                        newByExactMatch.TryAdd(normReading.Replace('\uFF5E', '\u301C'), entry);
                     }
                 }
             }
 
-            CurrentLanguage = targetLang;
-            IsLoaded = true;
+            lock (Entries)
+            {
+                Entries.Clear();
+                Entries.AddRange(newEntries);
+
+                ByRowId.Clear();
+                foreach (var kvp in newByRowId) ByRowId[kvp.Key] = kvp.Value;
+
+                ByExactMatch.Clear();
+                foreach (var kvp in newByExactMatch) ByExactMatch[kvp.Key] = kvp.Value;
+
+                ByStrippedMatch.Clear();
+                foreach (var kvp in newByStrippedMatch) ByStrippedMatch[kvp.Key] = kvp.Value;
+
+                CurrentLanguage = targetLang;
+                IsLoaded = true;
+            }
+
             log?.Information($"[KTGWordDatabase] Successfully loaded {Entries.Count} words for language {CurrentLanguage} (Defense: {Entries.Count(e => e.IsDefense)}).");
             return true;
         }
@@ -146,9 +167,7 @@ public static class KTGWordDatabase
 
     private static bool DetermineIsDefense(uint rowId, string localText, string enText)
     {
-        var lowerLocal = localText.ToLowerInvariant();
         var lowerEn = enText.ToLowerInvariant();
-        var enWords = enText.Split(' ', StringSplitOptions.RemoveEmptyEntries);
 
         // Magic pot items are enemy requests, never player defense
         if (localText.EndsWith("ちょうだい！") || lowerEn.StartsWith("gimme "))
@@ -183,25 +202,6 @@ public static class KTGWordDatabase
             return true;
         }
 
-        return false;
-    }
-
-    /// <summary>
-    /// Checks if the given word is a known Cactuar / Sabotender name.
-    /// </summary>
-    public static bool DetermineIsCactuar(string text, uint rowId)
-    {
-        if (string.IsNullOrWhiteSpace(text)) return false;
-        var clean = StripPunctuation(text);
-        if (clean.Contains("サボテンダー", StringComparison.OrdinalIgnoreCase) ||
-            clean.Contains("サボテン", StringComparison.OrdinalIgnoreCase) ||
-            clean.Contains("Cactuar", StringComparison.OrdinalIgnoreCase) ||
-            clean.Contains("Sabotender", StringComparison.OrdinalIgnoreCase) ||
-            clean.Contains("Kaktor", StringComparison.OrdinalIgnoreCase) ||
-            clean.Contains("Pampa", StringComparison.OrdinalIgnoreCase))
-        {
-            return true;
-        }
         return false;
     }
 
@@ -262,9 +262,16 @@ public static class KTGWordDatabase
         // Fuzzy match for partially obscured words (e.g. asterisks or missing characters)
         if (normalized.Contains('*') || normalized.Contains('?'))
         {
-            var pattern = "^" + System.Text.RegularExpressions.Regex.Escape(stripped).Replace("\\*", ".*").Replace("\\?", ".") + "$";
-            var regex = new System.Text.RegularExpressions.Regex(pattern, System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-            return Entries.FirstOrDefault(e => regex.IsMatch(e.Stripped));
+            try
+            {
+                var pattern = "^" + Regex.Escape(stripped).Replace("\\*", ".*").Replace("\\?", ".") + "$";
+                var regex = new Regex(pattern, RegexOptions.IgnoreCase, TimeSpan.FromMilliseconds(50));
+                return Entries.FirstOrDefault(e => regex.IsMatch(e.Stripped));
+            }
+            catch (RegexMatchTimeoutException)
+            {
+                // Fall through on regex timeout
+            }
         }
 
         // Suffix/prefix match for quotes obscured at head or tail (minimum 8 characters)

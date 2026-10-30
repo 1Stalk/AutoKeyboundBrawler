@@ -93,7 +93,7 @@ public static unsafe class AddonKTGEnemyCastBar
                     if (child == null || child->Type != NodeType.Text || !GUINodeUtils.IsNodeActuallyVisible(child, node)) continue;
 
                     // Node 5 is the numerical cast timer (e.g. "3.5s" or "0"), Node 2/3 is "Interrupted!"
-                    if (child->NodeId == 5 || child->NodeId == 3 || child->NodeId == 2) continue;
+                    if (child->NodeId is 5 or 3 or 2) continue;
 
                     var text = GUINodeUtils.GetNodeText(child);
                     if (!string.IsNullOrWhiteSpace(text))
@@ -134,14 +134,18 @@ public static unsafe class AddonKTGEnemyCastBar
     /// Checks if an active Cactuar is currently casting Needles, querying both UI castbar and live BattleChara objects.
     /// Exposes the live BattleChara (if found in memory) and the UI slot ID (if found in KTGEnemyCastBar).
     /// </summary>
-    public static bool TryGetNeedlesCastingChara(out Dalamud.Game.ClientState.Objects.Types.IBattleChara? castingChara, out string spellName, out int uiSlotId)
+    public static bool TryGetNeedlesCastingChara(
+        out Dalamud.Game.ClientState.Objects.Types.IBattleChara? castingChara,
+        out string spellName,
+        out int uiSlotId,
+        IReadOnlyList<KTGActiveCast>? cachedCasts = null)
     {
         castingChara = null;
         spellName = "針？本";
         uiSlotId = -1;
 
         // 1. Check UI castbar (CastBarEnemy) - prioritize non-boss slots
-        var casts = ReadActiveCasts();
+        var casts = cachedCasts ?? ReadActiveCasts();
         var uiCast = casts.FirstOrDefault(c => c.SlotId != 2 && IsNeedlesSpell(c.SpellName));
         if (uiCast != null)
         {
@@ -152,12 +156,20 @@ public static unsafe class AddonKTGEnemyCastBar
         // 2. Check Svc.Objects for BattleChara
         try
         {
+            var actionSheet = Svc.Data.GetExcelSheet<Lumina.Excel.Sheets.Action>();
             foreach (var obj in Svc.Objects)
             {
                 if (obj is Dalamud.Game.ClientState.Objects.Types.IBattleChara chara && chara.IsCasting)
                 {
                     var actionId = chara.CastActionId;
-                    var name = Svc.Data.GetExcelSheet<Lumina.Excel.Sheets.Action>()?.GetRowOrDefault(actionId)?.Name.ToString();
+                    if (actionId > 0 && KTGLocalizationRegistry.NeedlesActionIds.Contains(actionId))
+                    {
+                        castingChara = chara;
+                        spellName = actionSheet?.GetRowOrDefault(actionId)?.Name.ToString() ?? "針？本";
+                        return true;
+                    }
+
+                    var name = actionSheet?.GetRowOrDefault(actionId)?.Name.ToString();
                     if (IsNeedlesSpell(name, actionId))
                     {
                         castingChara = chara;
@@ -175,9 +187,9 @@ public static unsafe class AddonKTGEnemyCastBar
         return uiSlotId > 0;
     }
 
-    public static bool HasActiveNeedlesCast(out KTGActiveCast? needlesCast)
+    public static bool HasActiveNeedlesCast(out KTGActiveCast? needlesCast, IReadOnlyList<KTGActiveCast>? cachedCasts = null)
     {
-        if (TryGetNeedlesCastingChara(out var chara, out var spellName, out var uiSlotId))
+        if (TryGetNeedlesCastingChara(out var chara, out var spellName, out var uiSlotId, cachedCasts))
         {
             needlesCast = new KTGActiveCast(uiSlotId > 0 ? uiSlotId : (int)(chara?.EntityId ?? 0), spellName);
             return true;
@@ -272,13 +284,23 @@ public static unsafe class AddonKTGEnemyCastBar
         // 1. Primary source: Svc.Objects BattleCharas (exact in-game actor casting timers)
         try
         {
+            var actionSheet = Svc.Data.GetExcelSheet<Lumina.Excel.Sheets.Action>();
             foreach (var obj in Svc.Objects)
             {
                 if (obj is Dalamud.Game.ClientState.Objects.Types.IBattleChara chara && chara.IsCasting)
                 {
                     var actionId = chara.CastActionId;
-                    var name = Svc.Data.GetExcelSheet<Lumina.Excel.Sheets.Action>()?.GetRowOrDefault(actionId)?.Name.ToString();
+                    if (actionId > 0 && KTGLocalizationRegistry.HaltActionIds.Contains(actionId))
+                    {
+                        var cur = chara.CurrentCastTime;
+                        var total = Math.Max(0.1f, chara.TotalCastTime);
+                        var rem = Math.Max(0f, total - cur);
+                        var spell = actionSheet?.GetRowOrDefault(actionId)?.Name.ToString() ?? "Halt Spell";
+                        cast = new ActiveHaltCast(spell, cur, total, rem);
+                        return true;
+                    }
 
+                    var name = actionSheet?.GetRowOrDefault(actionId)?.Name.ToString();
                     if (IsHaltAvoidSpell(name, actionId))
                     {
                         var cur = chara.CurrentCastTime;

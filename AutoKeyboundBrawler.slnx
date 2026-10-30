@@ -2,5 +2,5 @@
   <Project Path="AutoKeyboundBrawler/AutoKeyboundBrawler.csproj">
     <Platform Project="x64" />
   </Project>
+  <Project Path="AutoKeyboundBrawler.Tests/AutoKeyboundBrawler.Tests.csproj" />
 </Solution>
-

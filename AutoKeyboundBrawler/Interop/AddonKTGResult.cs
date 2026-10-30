@@ -1,3 +1,4 @@
+using AutoKeyboundBrawler.Data;
 using ECommons;
 using ECommons.Automation;
 using ECommons.Automation.UIInput;
@@ -46,7 +47,7 @@ public static unsafe class AddonKTGResult
 
         try
         {
-            // 2. Scan component nodes for any button containing "Exit", "Leave", "Return", "Close", "OK"
+            // 2. Scan component nodes for any button containing localized close/exit text
             for (var i = 0; i < addon->UldManager.NodeListCount; i++)
             {
                 var node = addon->UldManager.NodeList[i];
@@ -61,12 +62,7 @@ public static unsafe class AddonKTGResult
                         if (child != null && child->Type == NodeType.Text)
                         {
                             var text = GUINodeUtils.GetNodeText(child);
-                            if (!string.IsNullOrEmpty(text) &&
-                                (text.Contains("Exit", StringComparison.OrdinalIgnoreCase) ||
-                                 text.Contains("Leave", StringComparison.OrdinalIgnoreCase) ||
-                                 text.Contains("Return", StringComparison.OrdinalIgnoreCase) ||
-                                 text.Contains("Close", StringComparison.OrdinalIgnoreCase) ||
-                                 text.Contains("OK", StringComparison.OrdinalIgnoreCase)))
+                            if (!string.IsNullOrEmpty(text) && KTGLocalizationRegistry.IsResultCloseButtonText(text))
                             {
                                 var btn = (AtkComponentButton*)compNode->Component;
                                 if (btn != null && btn->IsEnabled)

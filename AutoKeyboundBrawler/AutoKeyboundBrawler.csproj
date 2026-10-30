@@ -15,6 +15,7 @@
 
     <ItemGroup>
         <PackageReference Include="ECommons" Version="3.2.1.22" />
+        <InternalsVisibleTo Include="AutoKeyboundBrawler.Tests" />
     </ItemGroup>
 
     <ItemGroup>

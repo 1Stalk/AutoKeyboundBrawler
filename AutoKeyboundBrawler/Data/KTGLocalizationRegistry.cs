@@ -1,6 +1,10 @@
+using ECommons.DalamudServices;
+using Dalamud.Game.ClientState.Objects.Types;
 using System;
+using System.Collections.Frozen;
 using System.Collections.Generic;
 using System.Linq;
+using System.Numerics;
 
 namespace AutoKeyboundBrawler.Data;
 
@@ -19,7 +23,7 @@ public static class KTGLocalizationRegistry
         "préposée aux inscriptions" // French
     ];
 
-    public static bool IsRegistrar(uint dataId, string name)
+    public static bool IsRegistrar(uint dataId, string? name = null)
     {
         if (dataId == KeyboundRegistrarDataId)
         {
@@ -42,6 +46,67 @@ public static class KTGLocalizationRegistry
         return false;
     }
 
+    public static bool IsRegistrar(IGameObject? obj)
+    {
+        if (obj == null) return false;
+        if (obj.BaseId == KeyboundRegistrarDataId) return true;
+        return IsRegistrar(obj.BaseId, obj.Name.TextValue);
+    }
+
+    /// <summary>
+    /// Searches for Keybound Registrar near the local player.
+    /// Prioritizes current target (fast path), then enumerates game objects.
+    /// Only allocates strings for objects whose BaseId doesn't match the known DataId.
+    /// </summary>
+    public static IGameObject? FindNearbyRegistrar(float maxDistance, out float distance)
+    {
+        distance = float.MaxValue;
+        var localPlayer = Svc.Objects.LocalPlayer;
+        if (localPlayer == null) return null;
+
+        var playerPos = localPlayer.Position;
+        IGameObject? closestRegistrar = null;
+        var minDistance = float.MaxValue;
+
+        // Fast path: Current target is already Keybound Registrar and within interact range
+        var target = Svc.Targets.Target;
+        if (target != null && IsRegistrar(target))
+        {
+            var d = Vector3.Distance(playerPos, target.Position);
+            if (d <= 7.0f)
+            {
+                distance = d;
+                return target;
+            }
+
+            if (d <= maxDistance)
+            {
+                minDistance = d;
+                closestRegistrar = target;
+            }
+        }
+
+        // Full enumeration to find closest registrar
+        foreach (var obj in Svc.Objects)
+        {
+            if (obj == null) continue;
+
+            if (IsRegistrar(obj))
+            {
+                var d = Vector3.Distance(playerPos, obj.Position);
+                if (d < minDistance && d <= maxDistance)
+                {
+                    minDistance = d;
+                    closestRegistrar = obj;
+                    if (minDistance <= 2.0f) break;
+                }
+            }
+        }
+
+        distance = minDistance;
+        return closestRegistrar;
+    }
+
     // ------------------------------------------------------------------------
     // 2. Halt Avoidance Spells (Dynamic Sensory Jammer & Cursed Gaze)
     // ------------------------------------------------------------------------
@@ -49,13 +114,13 @@ public static class KTGLocalizationRegistry
     public const uint DynamicSensoryJammerKeyboundActionId = 49532;
     public const uint CursedGazeActionId = 49529;
 
-    public static readonly uint[] HaltActionIds =
-    [
+    public static readonly FrozenSet<uint> HaltActionIds = new HashSet<uint>
+    {
         DynamicSensoryJammerActionId,
         DynamicSensoryJammerKeyboundActionId,
         CursedGazeActionId,
         21396, 17407, 8342, 8341, 7354, 7353, 32448, 512
-    ];
+    }.ToFrozenSet();
 
     public static readonly string[] LocalizedHaltSpells =
     [
@@ -133,8 +198,8 @@ public static class KTGLocalizationRegistry
     // ------------------------------------------------------------------------
     // 4. Needles Spells & Cactuar Identification
     // ------------------------------------------------------------------------
-    public static readonly uint[] CactuarRowIds =
-    [
+    public static readonly FrozenSet<uint> CactuarRowIds = new HashSet<uint>
+    {
         501,  // サボテンダー / Cactuar
         841,  // ゴールドサボテンダー / Gold Cactuar
         844,  // コルテンダー
@@ -147,16 +212,16 @@ public static class KTGLocalizationRegistry
         1454, // サボテンばくだん
         1455, // サボテンまばりあ
         1728  // サボテンダー千本ノッカー
-    ];
+    }.ToFrozenSet();
 
-    public static readonly uint[] NeedlesActionIds =
-    [
+    public static readonly FrozenSet<uint> NeedlesActionIds = new HashSet<uint>
+    {
         49524, // 針？本 (Cast 7.0s, Keybound Brawler)
         48580, // 針？本 (Cast 8.0s, Keybound Brawler)
         48581, // 針？本 (Cast 8.0s, Keybound Brawler)
         39023, // Needles (Dawntrail minigame)
         501, 502, 503, 2678, 2679, 2680, 3104, 3105, 3106, 10375, 10730, 10731, 10876, 11397, 15087
-    ];
+    }.ToFrozenSet();
 
     public static readonly string[] LocalizedNeedlesSpellRoots =
     [
@@ -243,8 +308,8 @@ public static class KTGLocalizationRegistry
     // ------------------------------------------------------------------------
     // 6. Boss Ultimate Attacks (Demand Immediate Player Defense Shield)
     // ------------------------------------------------------------------------
-    public static readonly uint[] BossUltimateActionIds =
-    [
+    public static readonly FrozenSet<uint> BossUltimateActionIds = new HashSet<uint>
+    {
         49538, // メインカノン / Main Cannon (Cast 12.0s)
         49699, // バスターキャノン / Tankbuster (Cast 30.0s)
         49555, // エクリプスメテオ / Ecliptic Meteor (Cast 30.0s)
@@ -253,7 +318,7 @@ public static class KTGLocalizationRegistry
         49677, // ダンスマカブル / Sword Danse Macabre (Cast 12.0s)
         49749, // ファーストソング / The First Song (Cast 10.0s)
         49750  // ラストソング / The Last Song (Cast 10.0s)
-    ];
+    }.ToFrozenSet();
 
     public static readonly string[] LocalizedBossUltimateSpellRoots =
     [
@@ -295,5 +360,39 @@ public static class KTGLocalizationRegistry
     {
         if (string.IsNullOrWhiteSpace(text)) return false;
         return LocalizedRegisterButtonTexts.Any(b => text.Contains(b, StringComparison.OrdinalIgnoreCase));
+    }
+
+    // ------------------------------------------------------------------------
+    // 8. Duty Finder Commence Button
+    // ------------------------------------------------------------------------
+    public static readonly string[] LocalizedCommenceButtonTexts =
+    [
+        "Commence",     // English
+        "突入",          // Japanese
+        "Teilnehmen",   // German
+        "Commencer"     // French
+    ];
+
+    public static bool IsCommenceButtonText(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return false;
+        return LocalizedCommenceButtonTexts.Any(b => text.Contains(b, StringComparison.OrdinalIgnoreCase));
+    }
+
+    // ------------------------------------------------------------------------
+    // 9. Results Screen Close Button
+    // ------------------------------------------------------------------------
+    public static readonly string[] LocalizedResultCloseButtonTexts =
+    [
+        "Exit", "Leave", "Return", "Close", "OK", // English
+        "退出", "閉じる", "戻る",                     // Japanese
+        "Verlassen", "Beenden", "Schließen",       // German
+        "Quitter", "Fermer"                        // French
+    ];
+
+    public static bool IsResultCloseButtonText(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return false;
+        return LocalizedResultCloseButtonTexts.Any(b => text.Contains(b, StringComparison.OrdinalIgnoreCase));
     }
 }

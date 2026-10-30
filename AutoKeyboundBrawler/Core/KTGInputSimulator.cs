@@ -1,3 +1,4 @@
+using AutoKeyboundBrawler.Interop;
 using Dalamud.Game;
 using ECommons.DalamudServices;
 using FFXIVClientStructs.FFXIV.Client.System.Input;
@@ -5,7 +6,6 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
-using System.Runtime.InteropServices;
 
 namespace AutoKeyboundBrawler.Core;
 
@@ -188,7 +188,7 @@ public unsafe class KTGInputSimulator
     {
         // 1. NEVER send Escape if the input buffer is already empty!
         // Pressing Escape on an empty text input in FFXIV cancels target and opens the Exit Duty / System Menu!
-        if (Interop.AddonKTGInput.IsInputEmpty())
+        if (AddonKTGInput.IsInputEmpty())
         {
             return false;
         }
@@ -196,7 +196,7 @@ public unsafe class KTGInputSimulator
         // 2. If the text input is NOT active, NEVER send Escape!
         // Pressing Escape on an unfocused text window cancels target and opens the System Menu.
         // Send Enter first to activate the text window.
-        if (!Interop.AddonKTGInput.IsInputActive())
+        if (!AddonKTGInput.IsInputActive())
         {
             SendKey(SeVirtualKey.RETURN);
             return false;
@@ -246,46 +246,44 @@ public unsafe class KTGInputSimulator
 
     private static void SendWin32Key(SeVirtualKey key)
     {
-        const uint KEYEVENTF_KEYUP = 0x0002;
         var vk = (byte)key;
-        PInvoke.keybd_event(vk, 0, 0, 0);
-        PInvoke.keybd_event(vk, 0, KEYEVENTF_KEYUP, 0);
+        NativeMethods.keybd_event(vk, 0, 0, 0);
+        NativeMethods.keybd_event(vk, 0, NativeMethods.KEYEVENTF_KEYUP, 0);
     }
 
     public static void SendKeyWithShift(SeVirtualKey key)
     {
-        const ushort VK_SHIFT = 0x10;
         var vk = (ushort)key;
 
         try
         {
-            var inputs = new INPUT[4];
+            var inputs = stackalloc NativeMethods.INPUT[4];
             // 1. Shift Down
-            inputs[0] = new INPUT
+            inputs[0] = new NativeMethods.INPUT
             {
-                type = INPUT_KEYBOARD,
-                u = new InputUnion { ki = new KEYBDINPUT { wVk = VK_SHIFT, dwFlags = 0 } }
+                type = NativeMethods.INPUT_KEYBOARD,
+                u = new NativeMethods.InputUnion { ki = new NativeMethods.KEYBDINPUT { wVk = NativeMethods.VK_SHIFT, dwFlags = 0 } }
             };
             // 2. Key Down
-            inputs[1] = new INPUT
+            inputs[1] = new NativeMethods.INPUT
             {
-                type = INPUT_KEYBOARD,
-                u = new InputUnion { ki = new KEYBDINPUT { wVk = vk, dwFlags = 0 } }
+                type = NativeMethods.INPUT_KEYBOARD,
+                u = new NativeMethods.InputUnion { ki = new NativeMethods.KEYBDINPUT { wVk = vk, dwFlags = 0 } }
             };
             // 3. Key Up
-            inputs[2] = new INPUT
+            inputs[2] = new NativeMethods.INPUT
             {
-                type = INPUT_KEYBOARD,
-                u = new InputUnion { ki = new KEYBDINPUT { wVk = vk, dwFlags = KEYEVENTF_KEYUP } }
+                type = NativeMethods.INPUT_KEYBOARD,
+                u = new NativeMethods.InputUnion { ki = new NativeMethods.KEYBDINPUT { wVk = vk, dwFlags = NativeMethods.KEYEVENTF_KEYUP } }
             };
             // 4. Shift Up
-            inputs[3] = new INPUT
+            inputs[3] = new NativeMethods.INPUT
             {
-                type = INPUT_KEYBOARD,
-                u = new InputUnion { ki = new KEYBDINPUT { wVk = VK_SHIFT, dwFlags = KEYEVENTF_KEYUP } }
+                type = NativeMethods.INPUT_KEYBOARD,
+                u = new NativeMethods.InputUnion { ki = new NativeMethods.KEYBDINPUT { wVk = NativeMethods.VK_SHIFT, dwFlags = NativeMethods.KEYEVENTF_KEYUP } }
             };
 
-            if (PInvoke.SendInput((uint)inputs.Length, inputs, sizeof(INPUT)) > 0)
+            if (NativeMethods.SendInput(4, inputs, sizeof(NativeMethods.INPUT)) > 0)
             {
                 return;
             }
@@ -295,85 +293,56 @@ public unsafe class KTGInputSimulator
         }
 
         // Fallback using keybd_event
-        PInvoke.keybd_event((byte)VK_SHIFT, 0, 0, 0);
-        PInvoke.keybd_event((byte)vk, 0, 0, 0);
-        PInvoke.keybd_event((byte)vk, 0, KEYEVENTF_KEYUP, 0);
-        PInvoke.keybd_event((byte)VK_SHIFT, 0, KEYEVENTF_KEYUP, 0);
+        NativeMethods.keybd_event((byte)NativeMethods.VK_SHIFT, 0, 0, 0);
+        NativeMethods.keybd_event((byte)vk, 0, 0, 0);
+        NativeMethods.keybd_event((byte)vk, 0, NativeMethods.KEYEVENTF_KEYUP, 0);
+        NativeMethods.keybd_event((byte)NativeMethods.VK_SHIFT, 0, NativeMethods.KEYEVENTF_KEYUP, 0);
     }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct INPUT
-    {
-        public uint type;
-        public InputUnion u;
-    }
-
-    [StructLayout(LayoutKind.Explicit)]
-    private struct InputUnion
-    {
-        [FieldOffset(0)]
-        public KEYBDINPUT ki;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct KEYBDINPUT
-    {
-        public ushort wVk;
-        public ushort wScan;
-        public uint dwFlags;
-        public uint time;
-        public UIntPtr dwExtraInfo;
-    }
-
-    private const uint INPUT_KEYBOARD = 1;
-    private const uint KEYEVENTF_KEYUP = 0x0002;
-    private const uint KEYEVENTF_UNICODE = 0x0004;
 
     public static void SendUnicodeChar(char c)
     {
         try
         {
-            const uint WM_CHAR = 0x0102;
-            KeyboardDevice.ProcessKeyboardInputMessage(IntPtr.Zero, WM_CHAR, (IntPtr)c, IntPtr.Zero);
+            KeyboardDevice.ProcessKeyboardInputMessage(IntPtr.Zero, NativeMethods.WM_CHAR, (IntPtr)c, IntPtr.Zero);
             return;
         }
         catch
         {
         }
 
-        var inputs = new INPUT[2];
-        inputs[0] = new INPUT
+        var inputs = stackalloc NativeMethods.INPUT[2];
+        inputs[0] = new NativeMethods.INPUT
         {
-            type = INPUT_KEYBOARD,
-            u = new InputUnion
+            type = NativeMethods.INPUT_KEYBOARD,
+            u = new NativeMethods.InputUnion
             {
-                ki = new KEYBDINPUT
+                ki = new NativeMethods.KEYBDINPUT
                 {
                     wVk = 0,
                     wScan = c,
-                    dwFlags = KEYEVENTF_UNICODE,
+                    dwFlags = NativeMethods.KEYEVENTF_UNICODE,
                     time = 0,
                     dwExtraInfo = UIntPtr.Zero
                 }
             }
         };
-        inputs[1] = new INPUT
+        inputs[1] = new NativeMethods.INPUT
         {
-            type = INPUT_KEYBOARD,
-            u = new InputUnion
+            type = NativeMethods.INPUT_KEYBOARD,
+            u = new NativeMethods.InputUnion
             {
-                ki = new KEYBDINPUT
+                ki = new NativeMethods.KEYBDINPUT
                 {
                     wVk = 0,
                     wScan = c,
-                    dwFlags = KEYEVENTF_UNICODE | KEYEVENTF_KEYUP,
+                    dwFlags = NativeMethods.KEYEVENTF_UNICODE | NativeMethods.KEYEVENTF_KEYUP,
                     time = 0,
                     dwExtraInfo = UIntPtr.Zero
                 }
             }
         };
 
-        PInvoke.SendInput((uint)inputs.Length, inputs, sizeof(INPUT));
+        NativeMethods.SendInput(2, inputs, sizeof(NativeMethods.INPUT));
     }
 
     private static bool TryEnqueueCircumflex(char ch, Queue<KeyAction> queue)
@@ -418,7 +387,7 @@ public unsafe class KTGInputSimulator
 
     private static SeVirtualKey GetCircumflexDeadKey()
     {
-        var scan = PInvoke.VkKeyScan('^');
+        var scan = NativeMethods.VkKeyScan('^');
         if (scan != -1)
         {
             var shiftState = (byte)((scan >> 8) & 0xFF);
@@ -452,10 +421,10 @@ public unsafe class KTGInputSimulator
             case 'ü':
             case 'Ü':
             case 'ß':
-                var germanScan = PInvoke.VkKeyScan(c);
+                var germanScan = NativeMethods.VkKeyScan(c);
                 if (germanScan == -1 && char.IsUpper(c))
                 {
-                    germanScan = PInvoke.VkKeyScan(char.ToLowerInvariant(c));
+                    germanScan = NativeMethods.VkKeyScan(char.ToLowerInvariant(c));
                 }
 
                 if (germanScan != -1)
@@ -487,10 +456,10 @@ public unsafe class KTGInputSimulator
             case 'Ç':
             case 'ù':
             case 'Ù':
-                var frenchScan = PInvoke.VkKeyScan(c);
+                var frenchScan = NativeMethods.VkKeyScan(c);
                 if (frenchScan == -1 && char.IsUpper(c))
                 {
-                    frenchScan = PInvoke.VkKeyScan(char.ToLowerInvariant(c));
+                    frenchScan = NativeMethods.VkKeyScan(char.ToLowerInvariant(c));
                 }
 
                 if (frenchScan != -1)
@@ -518,7 +487,7 @@ public unsafe class KTGInputSimulator
             // Check active Windows keyboard layout via VkKeyScan.
             // On French AZERTY, physical top-row keys 0..9 require Shift (shiftState == 1),
             // while on QWERTY, QWERTZ, Japanese, etc. shiftState is 0.
-            var digitScan = PInvoke.VkKeyScan(c);
+            var digitScan = NativeMethods.VkKeyScan(c);
             if (digitScan != -1)
             {
                 var scanVk = (byte)(digitScan & 0xFF);
@@ -534,10 +503,10 @@ public unsafe class KTGInputSimulator
         }
 
         // 4. Dynamic lookup via active Windows keyboard layout
-        var scan = PInvoke.VkKeyScan(c);
+        var scan = NativeMethods.VkKeyScan(c);
         if (scan == -1 && char.IsUpper(c))
         {
-            scan = PInvoke.VkKeyScan(char.ToLowerInvariant(c));
+            scan = NativeMethods.VkKeyScan(char.ToLowerInvariant(c));
         }
 
         if (scan != -1)
@@ -614,17 +583,5 @@ public unsafe class KTGInputSimulator
 
         key = SeVirtualKey.NO_KEY;
         return false;
-    }
-
-    private static class PInvoke
-    {
-        [DllImport("user32.dll", CharSet = CharSet.Unicode, EntryPoint = "VkKeyScanW")]
-        public static extern short VkKeyScan(char ch);
-
-        [DllImport("user32.dll")]
-        public static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, int dwExtraInfo);
-
-        [DllImport("user32.dll", SetLastError = true)]
-        public static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
     }
 }

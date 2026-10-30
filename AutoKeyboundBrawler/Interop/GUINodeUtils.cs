@@ -1,6 +1,5 @@
 using FFXIVClientStructs.FFXIV.Component.GUI;
 using System;
-using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using System.Text;
 
@@ -67,31 +66,7 @@ public static unsafe class GUINodeUtils
         return Marshal.PtrToStringUTF8((nint)ptr);
     }
 
-    public static List<nint> GetAllChildNodes(AtkResNode* node)
-    {
-        var list = new List<nint>();
-        if (node == null) return list;
-        RecursiveAppend(node, list, 0);
-        return list;
-    }
-
-    private static void RecursiveAppend(AtkResNode* node, List<nint> list, int depth)
-    {
-        if (node == null || depth > 24) return;
-        list.Add((nint)node);
-
-        if (node->ChildNode == null) return;
-        RecursiveAppend(node->ChildNode, list, depth + 1);
-
-        var sibling = node->ChildNode->PrevSiblingNode;
-        var count = 0;
-        while (sibling != null && count++ < 64)
-        {
-            RecursiveAppend(sibling, list, depth + 1);
-            sibling = sibling->PrevSiblingNode;
-        }
-    }
-
+    /// <summary>Diagnostic helper to dump full addon hierarchy if needed.</summary>
     public static string DumpAddon(AtkUnitBase* addon)
     {
         if (addon == null) return "Addon is null";

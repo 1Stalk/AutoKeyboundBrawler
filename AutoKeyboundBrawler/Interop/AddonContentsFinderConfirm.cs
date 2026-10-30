@@ -1,3 +1,4 @@
+using AutoKeyboundBrawler.Data;
 using ECommons;
 using ECommons.Automation;
 using ECommons.Automation.UIInput;
@@ -26,7 +27,7 @@ public static unsafe class AddonContentsFinderConfirm
 
         try
         {
-            // 1. Scan for button labeled "Commence" and click with native ClickAddonButton
+            // 1. Scan for button labeled with localized "Commence" (Commence / 突入 / Teilnehmen / Commencer)
             for (var i = 0; i < addon->UldManager.NodeListCount; i++)
             {
                 var node = addon->UldManager.NodeList[i];
@@ -41,7 +42,7 @@ public static unsafe class AddonContentsFinderConfirm
                         if (child != null && child->Type == NodeType.Text)
                         {
                             var text = GUINodeUtils.GetNodeText(child);
-                            if (!string.IsNullOrEmpty(text) && text.Contains("Commence", StringComparison.OrdinalIgnoreCase))
+                            if (!string.IsNullOrEmpty(text) && KTGLocalizationRegistry.IsCommenceButtonText(text))
                             {
                                 var btn = (AtkComponentButton*)compNode->Component;
                                 if (btn != null && btn->IsEnabled)

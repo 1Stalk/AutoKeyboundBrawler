@@ -228,9 +228,9 @@ public class MainWindow : Window, IDisposable
 
         var status = _automation.CurrentStatus;
         var isTyping = _automation.IsTyping;
-        var isHalt = status.StartsWith("SAFETY") || status.Contains("Halt") || status.Contains("Obstruction");
-        var isDuty = _automation.CurrentPhase == EventPhase.InMinigame || status.Contains("In Combat");
-        var isQueue = _automation.CurrentPhase is EventPhase.InQueue or EventPhase.Commencing or EventPhase.Registering || status.Contains("Queued") || status.Contains("Commencing") || status.Contains("Registration");
+        var isHalt = _automation.IsHaltStatus;
+        var isDuty = _automation.IsInDutyPhase;
+        var isQueue = _automation.IsInQueuePhase;
 
         var dotColor = isHalt ? FF7RTheme.LimitRed :
                        isTyping ? FF7RTheme.MakoCyan :

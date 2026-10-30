@@ -1,7 +1,8 @@
+using AutoKeyboundBrawler.Interop;
+using ECommons.DalamudServices;
 using FFXIVClientStructs.FFXIV.Client.System.Input;
 using FFXIVClientStructs.FFXIV.Client.UI.Misc;
 using System;
-using System.Runtime.InteropServices;
 
 namespace AutoKeyboundBrawler.Core;
 
@@ -16,27 +17,28 @@ namespace AutoKeyboundBrawler.Core;
 /// Layer 2: SendMessage WM_KEYDOWN/WM_KEYUP to the actual FFXIV game window
 ///     (found via FindWindow("FFXIVGAME") to avoid hitting an IME window).
 /// Layer 3: Directly zero InputTimerModule timer fields (top-level + per-device).
-/// Layer 4: OS-level mouse_event(MOVE,0,0) to reset Windows GetLastInputInfo.
 /// </summary>
 public static unsafe class KTGAntiAfk
 {
     private static DateTime _lastKeystrokeTime = DateTime.MinValue;
     private static DateTime _lastWndMsgTime = DateTime.MinValue;
-    private static DateTime _lastOsPulseTime = DateTime.MinValue;
     private static DateTime _lastDiagLogTime = DateTime.MinValue;
+    private static DateTime _lastWarnLogTime = DateTime.MinValue;
     private static IntPtr _cachedGameHwnd = IntPtr.Zero;
 
     public static void KeepAlive()
     {
+        var now = DateTime.UtcNow;
+
         // ── Layer 1: Inject a harmless key via KeyboardDevice ─────────────
         // Send a Shift press/release through the game's internal keyboard
         // device every 3 seconds. This goes through the same code path as
         // real player keypresses and is the only method proven to reset the
         // content inactivity timer on Japanese clients.
         // Shift alone has no gameplay effect (no character produced, no action).
-        if ((DateTime.UtcNow - _lastKeystrokeTime).TotalSeconds >= 3.0)
+        if ((now - _lastKeystrokeTime).TotalSeconds >= 3.0)
         {
-            _lastKeystrokeTime = DateTime.UtcNow;
+            _lastKeystrokeTime = now;
             try
             {
                 var manager = InputDeviceManager.Instance();
@@ -55,21 +57,18 @@ public static unsafe class KTGAntiAfk
         // Use FindWindow("FFXIVGAME") to find the real game window, NOT
         // Process.MainWindowHandle which can return an IME composition window
         // on Japanese systems. Use SendMessage (synchronous) for guaranteed
-        // delivery, sending both WM_MOUSEMOVE and WM_KEYDOWN/WM_KEYUP.
-        if ((DateTime.UtcNow - _lastWndMsgTime).TotalSeconds >= 3.0)
+        // delivery of WM_KEYDOWN/WM_KEYUP.
+        if ((now - _lastWndMsgTime).TotalSeconds >= 3.0)
         {
-            _lastWndMsgTime = DateTime.UtcNow;
+            _lastWndMsgTime = now;
             try
             {
                 var hwnd = GetGameWindowHandle();
                 if (hwnd != IntPtr.Zero)
                 {
-                    // Mouse activity signal
-                    SendMessage(hwnd, WM_MOUSEMOVE, IntPtr.Zero, MakeLParam(1, 1));
-
                     // Keyboard activity signal (Shift down + up)
-                    SendMessage(hwnd, WM_KEYDOWN, (IntPtr)VK_SHIFT, IntPtr.Zero);
-                    SendMessage(hwnd, WM_KEYUP, (IntPtr)VK_SHIFT, unchecked((IntPtr)(int)0xC0100001));
+                    NativeMethods.SendMessage(hwnd, NativeMethods.WM_KEYDOWN, (IntPtr)NativeMethods.VK_SHIFT, IntPtr.Zero);
+                    NativeMethods.SendMessage(hwnd, NativeMethods.WM_KEYUP, (IntPtr)NativeMethods.VK_SHIFT, unchecked((IntPtr)(int)0xC0100001));
                 }
             }
             catch
@@ -85,11 +84,11 @@ public static unsafe class KTGAntiAfk
             if (timerModule != null)
             {
                 // Diagnostic: log timer values periodically to help debug kicks
-                if ((DateTime.UtcNow - _lastDiagLogTime).TotalSeconds >= 10.0)
+                if ((now - _lastDiagLogTime).TotalSeconds >= 10.0)
                 {
-                    _lastDiagLogTime = DateTime.UtcNow;
+                    _lastDiagLogTime = now;
                     var hwnd = GetGameWindowHandle();
-                    ECommons.DalamudServices.Svc.Log.Debug(
+                    Svc.Log?.Debug(
                         $"[AntiAfk] Content={timerModule->ContentInputTimer:F2} " +
                         $"Afk={timerModule->AfkTimer:F2} Input={timerModule->InputTimer:F2} " +
                         $"Limit={timerModule->InstanceContentAfkTimeLimit:F0} " +
@@ -114,20 +113,6 @@ public static unsafe class KTGAntiAfk
         {
             LogDiag($"[AntiAfk] InputTimerModule reset failed: {ex.Message}");
         }
-
-        // ── Layer 4: OS-level idle timer reset ───────────────────────────
-        if ((DateTime.UtcNow - _lastOsPulseTime).TotalSeconds >= 5.0)
-        {
-            _lastOsPulseTime = DateTime.UtcNow;
-            try
-            {
-                mouse_event(MOUSEEVENTF_MOVE, 0, 0, 0, 0);
-            }
-            catch
-            {
-                // Ignore
-            }
-        }
     }
 
     private static void ResetInputTimerDataSpan(Span<InputTimerModule.InputTimerData> span)
@@ -150,8 +135,7 @@ public static unsafe class KTGAntiAfk
 
         try
         {
-            // FindWindow by class name — reliable across all locales
-            _cachedGameHwnd = FindWindow("FFXIVGAME", null);
+            _cachedGameHwnd = NativeMethods.FindWindow("FFXIVGAME", null);
         }
         catch
         {
@@ -161,32 +145,14 @@ public static unsafe class KTGAntiAfk
         return _cachedGameHwnd;
     }
 
-    /// <summary>Log diagnostic message at most once per 30 seconds to avoid spam.</summary>
+    /// <summary>Log diagnostic warning at most once per 30 seconds to avoid spam.</summary>
     private static void LogDiag(string message)
     {
-        if ((DateTime.UtcNow - _lastDiagLogTime).TotalSeconds >= 30.0)
+        var now = DateTime.UtcNow;
+        if ((now - _lastWarnLogTime).TotalSeconds >= 30.0)
         {
-            _lastDiagLogTime = DateTime.UtcNow;
-            ECommons.DalamudServices.Svc.Log.Warning(message);
+            _lastWarnLogTime = now;
+            Svc.Log?.Warning(message);
         }
     }
-
-    // ── Win32 Interop ────────────────────────────────────────────────────
-
-    private const uint WM_MOUSEMOVE = 0x0200;
-    private const uint WM_KEYDOWN = 0x0100;
-    private const uint WM_KEYUP = 0x0101;
-    private const int VK_SHIFT = 0x10;
-    private const uint MOUSEEVENTF_MOVE = 0x0001;
-
-    private static IntPtr MakeLParam(int x, int y) => (IntPtr)((y << 16) | (x & 0xFFFF));
-
-    [DllImport("user32.dll", CharSet = CharSet.Auto)]
-    private static extern IntPtr FindWindow(string lpClassName, string? lpWindowName);
-
-    [DllImport("user32.dll", CharSet = CharSet.Auto)]
-    private static extern IntPtr SendMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
-
-    [DllImport("user32.dll")]
-    private static extern void mouse_event(uint dwFlags, uint dx, uint dy, uint dwData, int dwExtraInfo);
 }

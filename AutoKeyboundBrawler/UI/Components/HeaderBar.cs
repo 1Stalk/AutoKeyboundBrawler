@@ -65,11 +65,10 @@ internal static class HeaderBar
         // Status dot
         var dotRadius = 3f * scale;
         var dotCenter = new Vector2(textLeft + dotRadius, midY);
-        var status = automation.CurrentStatus;
         var isTyping = automation.IsTyping;
-        var isHalt = status.StartsWith("SAFETY") || status.Contains("Halt") || status.Contains("Obstruction");
-        var isDuty = automation.CurrentPhase == EventPhase.InMinigame || status.Contains("In Combat");
-        var isQueue = automation.CurrentPhase is EventPhase.InQueue or EventPhase.Commencing or EventPhase.Registering || status.Contains("Queued") || status.Contains("Commencing") || status.Contains("Registration");
+        var isHalt = automation.IsHaltStatus;
+        var isDuty = automation.IsInDutyPhase;
+        var isQueue = automation.IsInQueuePhase;
 
         var dotColor = isHalt ? FF7RTheme.LimitRed :
                        isTyping ? FF7RTheme.MakoCyan :
@@ -97,11 +96,10 @@ internal static class HeaderBar
     private static void DrawStatusPill(ImDrawListPtr dl, KTGAutomationManager automation, float leftX, float rightLimit, float midY, bool compact)
     {
         var scale = ImGuiHelpers.GlobalScale;
-        var status = automation.CurrentStatus;
         var isTyping = automation.IsTyping;
-        var isHalt = status.StartsWith("SAFETY") || status.Contains("Halt") || status.Contains("Obstruction");
-        var isDuty = automation.CurrentPhase == EventPhase.InMinigame || status.Contains("In Combat");
-        var isQueue = automation.CurrentPhase is EventPhase.InQueue or EventPhase.Commencing or EventPhase.Registering || status.Contains("Queued") || status.Contains("Commencing") || status.Contains("Registration");
+        var isHalt = automation.IsHaltStatus;
+        var isDuty = automation.IsInDutyPhase;
+        var isQueue = automation.IsInQueuePhase;
 
         var badgeText = isHalt ? Loc.Get("BadgeHalt") :
                         isTyping ? Loc.Get("BadgeTyping") :

@@ -109,13 +109,9 @@ public sealed class Plugin : IDalamudPlugin
             return;
         }
 
-        var localPlayer = Svc.Objects.LocalPlayer;
-        if (localPlayer == null) return;
-
-        var registrar = FindNearbyRegistrar(12.0f);
+        var registrar = KTGLocalizationRegistry.FindNearbyRegistrar(12.0f, out var dist);
         if (registrar != null)
         {
-            var dist = System.Numerics.Vector3.Distance(localPlayer.Position, registrar.Position);
             if (dist <= 7.0f)
             {
                 if (!_hasTriggeredProximityOpen)
@@ -138,39 +134,6 @@ public sealed class Plugin : IDalamudPlugin
         {
             _hasTriggeredProximityOpen = false;
         }
-    }
-
-    private static Dalamud.Game.ClientState.Objects.Types.IGameObject? FindNearbyRegistrar(float maxDistance)
-    {
-        var localPlayer = Svc.Objects.LocalPlayer;
-        if (localPlayer == null) return null;
-
-        // Fast path: Current target is already Keybound Registrar
-        if (Svc.Targets.Target != null &&
-            KTGLocalizationRegistry.IsRegistrar(Svc.Targets.Target.BaseId, Svc.Targets.Target.Name.TextValue))
-        {
-            var dist = System.Numerics.Vector3.Distance(localPlayer.Position, Svc.Targets.Target.Position);
-            if (dist <= maxDistance)
-            {
-                return Svc.Targets.Target;
-            }
-        }
-
-        // Full enumeration of game objects
-        foreach (var obj in Svc.Objects)
-        {
-            if (obj == null) continue;
-            if (KTGLocalizationRegistry.IsRegistrar(obj.BaseId, obj.Name.TextValue))
-            {
-                var dist = System.Numerics.Vector3.Distance(localPlayer.Position, obj.Position);
-                if (dist <= maxDistance)
-                {
-                    return obj;
-                }
-            }
-        }
-
-        return null;
     }
 
     public void OpenUI()

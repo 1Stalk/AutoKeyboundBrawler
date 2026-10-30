@@ -1,6 +1,5 @@
 using Dalamud.Bindings.ImGui;
 using Dalamud.Interface.Utility;
-using System;
 using System.Numerics;
 
 namespace AutoKeyboundBrawler.UI.Components;
@@ -25,8 +24,14 @@ internal static class FF7ToggleSwitch
             changed = true;
         }
 
-        var on = Motion.Approach(Motion.Key(id), value ? 1f : 0f, 18f);
         var hover = Motion.Hover(Motion.Key(id, 1), hit.Hovered);
+        RenderSwitch(id, value, origin, size, scale, hover, activeColor);
+        return changed;
+    }
+
+    private static void RenderSwitch(string id, bool value, Vector2 origin, Vector2 size, float scale, float hover, Vector4? activeColor)
+    {
+        var on = Motion.Approach(Motion.Key(id), value ? 1f : 0f, 18f);
         var dl = ImGui.GetWindowDrawList();
         var end = origin + size;
         var rounding = 3f * scale;
@@ -64,8 +69,6 @@ internal static class FF7ToggleSwitch
             var pipRadius = 2f * scale;
             dl.AddCircleFilled(pipCenter, pipRadius, Paint.Col(onCol));
         }
-
-        return changed;
     }
 
     public static bool DrawRow(string id, string title, string description, ref bool value, Vector4? activeColor = null, string? tooltip = null)
@@ -73,7 +76,7 @@ internal static class FF7ToggleSwitch
         var scale = ImGuiHelpers.GlobalScale;
         var origin = ImGui.GetCursorScreenPos();
         var availWidth = ImGui.GetContentRegionAvail().X;
-        var switchWidth = TrackWidth * scale;
+        var switchSize = new Vector2(TrackWidth * scale, TrackHeight * scale);
 
         // Compact: title only, description goes to tooltip
         var titleH = ImGui.GetTextLineHeight();
@@ -105,12 +108,8 @@ internal static class FF7ToggleSwitch
         dl.AddText(new Vector2(textLeft, textTop), Paint.Col(titleCol), title);
 
         // Draw Switch aligned to right
-        var switchPos = new Vector2(origin.X + availWidth - switchWidth - 6f * scale, origin.Y + (rowH - TrackHeight * scale) * 0.5f);
-        ImGui.SetCursorScreenPos(switchPos);
-        if (Draw(id, ref value, activeColor))
-        {
-            changed = true;
-        }
+        var switchPos = new Vector2(origin.X + availWidth - switchSize.X - 6f * scale, origin.Y + (rowH - switchSize.Y) * 0.5f);
+        RenderSwitch(id, value, switchPos, switchSize, scale, hover, activeColor);
 
         // Advance cursor
         ImGui.SetCursorScreenPos(new Vector2(origin.X, origin.Y + rowH + 2f * scale));
@@ -127,4 +126,3 @@ internal static class FF7ToggleSwitch
         return changed;
     }
 }
-

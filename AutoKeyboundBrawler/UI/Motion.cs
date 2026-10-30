@@ -1,5 +1,4 @@
 using Dalamud.Bindings.ImGui;
-using Dalamud.Interface.Utility;
 using Dalamud.Interface.Utility.Raii;
 using System;
 using System.Collections.Generic;
@@ -9,9 +8,6 @@ namespace AutoKeyboundBrawler.UI;
 
 internal static class Motion
 {
-    public const float SwitchMs = 200f;
-    public const float SwitchSlide = 8f;
-
     private static readonly Dictionary<int, float> Values = new();
 
     public static float DeltaTime => MathF.Min(ImGui.GetIO().DeltaTime, 0.05f);
@@ -51,23 +47,6 @@ internal static class Motion
     public static float EaseInOutCubic(float t)
         => t < 0.5f ? 4f * t * t * t : 1f - MathF.Pow(-2f * t + 2f, 3f) / 2f;
 
-    public static float EaseOutCubic(float t)
-    {
-        var u = 1f - t;
-        return 1f - u * u * u;
-    }
-
     public static ImRaii.StyleDisposable PushAlpha(float progress)
         => ImRaii.PushStyle(ImGuiStyleVar.Alpha, MathF.Max(0.001f, progress * ImGui.GetStyle().Alpha));
-
-    public static ImRaii.StyleDisposable PushReveal(float progress, float slide = SwitchSlide)
-    {
-        if (progress < 1f)
-        {
-            ImGui.SetCursorPosY(ImGui.GetCursorPosY() + (1f - progress) * slide * ImGuiHelpers.GlobalScale);
-        }
-
-        return PushAlpha(progress);
-    }
 }
-

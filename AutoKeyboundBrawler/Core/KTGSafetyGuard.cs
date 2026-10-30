@@ -1,6 +1,5 @@
 using AutoKeyboundBrawler.Interop;
 using ECommons.DalamudServices;
-using System;
 
 namespace AutoKeyboundBrawler.Core;
 
@@ -14,7 +13,10 @@ public static class KTGSafetyGuard
 
     public static unsafe bool IsPlayerStunned()
     {
-        var chara = (FFXIVClientStructs.FFXIV.Client.Game.Character.BattleChara*)ECommons.GameHelpers.Player.Character;
+        var localPlayer = Svc.Objects.LocalPlayer;
+        if (localPlayer == null) return false;
+
+        var chara = (FFXIVClientStructs.FFXIV.Client.Game.Character.BattleChara*)localPlayer.Address;
         if (chara == null) return false;
 
         return chara->StatusManager.HasStatus(2) ||

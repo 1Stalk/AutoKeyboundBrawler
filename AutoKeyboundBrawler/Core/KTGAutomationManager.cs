@@ -3,7 +3,7 @@ using AutoKeyboundBrawler.Interop;
 using Dalamud.Plugin.Services;
 using ECommons.DalamudServices;
 using System;
-using System.Linq;
+using System.Collections.Generic;
 
 namespace AutoKeyboundBrawler.Core;
 
@@ -28,8 +28,7 @@ public class KTGAutomationManager
 
     // Humanized delay tracking: a random delay is pre-rolled per named action
     // and reused until the action fires, then re-rolled for the next attempt.
-    private int _rolledDelayMs;
-    private string _rolledDelayKey = string.Empty;
+    private readonly Dictionary<string, int> _rolledDelays = new();
 
     private bool _wasInHalt;
     private HaltRecoveryState _haltRecoveryState = HaltRecoveryState.None;
@@ -43,7 +42,12 @@ public class KTGAutomationManager
     public string ActiveWord => _simulator.IsTyping ? _simulator.CurrentWord : _lastTargetWord;
     public bool IsTyping => _simulator.IsTyping;
     public int RemainingChars => _simulator.RemainingChars;
-    public EventPhase CurrentPhase => KTGStateReader.GetCurrentPhase();
+    public EventPhase CurrentPhase { get; private set; } = EventPhase.None;
+
+    public bool IsInDutyPhase => CurrentPhase == EventPhase.InMinigame || CurrentStatus.Contains("In Combat");
+    public bool IsInQueuePhase => CurrentPhase is EventPhase.InQueue or EventPhase.Commencing or EventPhase.Registering ||
+                                  CurrentStatus.Contains("Queued") || CurrentStatus.Contains("Commencing") || CurrentStatus.Contains("Registration");
+    public bool IsHaltStatus => CurrentStatus.StartsWith("SAFETY") || CurrentStatus.Contains("Halt") || CurrentStatus.Contains("Obstruction");
 
     public KTGAutomationManager(Configuration config, IPluginLog log)
     {
@@ -53,6 +57,8 @@ public class KTGAutomationManager
 
     public void Tick()
     {
+        CurrentPhase = KTGStateReader.GetCurrentPhase();
+
         var isActive = _config.MinigameAutoplay || _config.AutoLoopEnabled || _config.Enabled;
         if (!isActive)
         {
@@ -69,12 +75,10 @@ public class KTGAutomationManager
             KTGWordDatabase.Load(Svc.Data, _log);
         }
 
-        var phase = KTGStateReader.GetCurrentPhase();
-
-        // Keep-alive: Reset both game-internal ContentInputTimer and OS idle timer so FFXIV never auto-kicks for inactivity
+        // Keep-alive: Reset game-internal ContentInputTimer and input timers so FFXIV never auto-kicks for inactivity
         KTGAntiAfk.KeepAlive();
 
-        switch (phase)
+        switch (CurrentPhase)
         {
             case EventPhase.InMinigame:
                 HandleMinigamePhase();
@@ -112,10 +116,6 @@ public class KTGAutomationManager
     }
 
     // ── Humanized Delay Helpers ─────────────────────────────────────────
-    // Each loop action gets a pre-rolled random delay. The delay is generated
-    // once per action key and reused until consumed (action fires), then
-    // a fresh delay is rolled for the next attempt. This prevents the jitter
-    // that would occur if we re-rolled every frame.
 
     /// <summary>
     /// Returns a pre-rolled random delay (ms) for the named action.
@@ -123,14 +123,14 @@ public class KTGAutomationManager
     /// </summary>
     private int GetHumanizedDelay(string action, float minFactor = 1f, float maxFactor = 1f)
     {
-        if (_rolledDelayKey != action)
+        if (!_rolledDelays.TryGetValue(action, out var delay))
         {
             var baseMin = Math.Max(200, (int)(_config.LoopDelayMinMs * minFactor));
             var baseMax = Math.Max(baseMin + 100, (int)(_config.LoopDelayMaxMs * maxFactor));
-            _rolledDelayMs = _rng.Next(baseMin, baseMax + 1);
-            _rolledDelayKey = action;
+            delay = _rng.Next(baseMin, baseMax + 1);
+            _rolledDelays[action] = delay;
         }
-        return _rolledDelayMs;
+        return delay;
     }
 
     /// <summary>
@@ -144,11 +144,18 @@ public class KTGAutomationManager
     }
 
     /// <summary>
-    /// Clears the pre-rolled delay so the next action gets a fresh random value.
+    /// Clears the pre-rolled delay for the named action (or all actions if null).
     /// </summary>
-    private void ConsumeHumanizedDelay()
+    private void ConsumeHumanizedDelay(string? action = null)
     {
-        _rolledDelayKey = string.Empty;
+        if (action != null)
+        {
+            _rolledDelays.Remove(action);
+        }
+        else
+        {
+            _rolledDelays.Clear();
+        }
     }
 
     // ── Phase Handlers ──────────────────────────────────────────────────
@@ -330,11 +337,12 @@ public class KTGAutomationManager
 
         if ((_config.AutoLeaveResults || _config.AutoLoopEnabled) && IsHumanizedReady("results", _lastActionTime, 1.5f, 2.0f))
         {
-            _log.Information($"[AutoKeyboundBrawler] Auto-closing results screen (waited {_rolledDelayMs}ms)...");
+            var delay = GetHumanizedDelay("results", 1.5f, 2.0f);
+            _log.Information($"[AutoKeyboundBrawler] Auto-closing results screen (waited {delay}ms)...");
             if (AddonKTGResult.CloseResults())
             {
                 _lastActionTime = DateTime.UtcNow;
-                ConsumeHumanizedDelay();
+                ConsumeHumanizedDelay("results");
             }
         }
     }
@@ -349,11 +357,12 @@ public class KTGAutomationManager
 
         if ((_config.AutoConfirmRegister || _config.AutoCommenceDuty || _config.AutoLoopEnabled) && IsHumanizedReady("commence", _lastActionTime, 0.8f, 1.2f))
         {
-            _log.Information($"[AutoKeyboundBrawler] Duty popped! Auto-commencing (waited {_rolledDelayMs}ms)...");
+            var delay = GetHumanizedDelay("commence", 0.8f, 1.2f);
+            _log.Information($"[AutoKeyboundBrawler] Duty popped! Auto-commencing (waited {delay}ms)...");
             if (AddonContentsFinderConfirm.CommenceDuty())
             {
                 _lastActionTime = DateTime.UtcNow;
-                ConsumeHumanizedDelay();
+                ConsumeHumanizedDelay("commence");
             }
         }
     }
@@ -367,8 +376,7 @@ public class KTGAutomationManager
         KTGStateReader.ClearCache();
 
         // Safely clear target if it is Keybound Registrar so we don't hold lock on the NPC while in queue
-        if (Svc.Targets.Target != null &&
-            KTGLocalizationRegistry.IsRegistrar(Svc.Targets.Target.BaseId, Svc.Targets.Target.Name.TextValue))
+        if (KTGLocalizationRegistry.IsRegistrar(Svc.Targets.Target))
         {
             Svc.Targets.Target = null;
         }
@@ -390,12 +398,14 @@ public class KTGAutomationManager
 
         if ((_config.AutoConfirmRegister || _config.AutoLoopEnabled) && IsHumanizedReady("register", _lastActionTime, 0.5f, 0.9f))
         {
-            _log.Information($"[AutoKeyboundBrawler] Auto-confirming registration (waited {_rolledDelayMs}ms)...");
+            var delay = GetHumanizedDelay("register", 0.5f, 0.9f);
+            _log.Information($"[AutoKeyboundBrawler] Auto-confirming registration (waited {delay}ms)...");
             if (AddonKTGEnterDialogue.ConfirmRegistration())
             {
                 _lastActionTime = DateTime.UtcNow;
                 _lastRegistrationTime = DateTime.UtcNow;
-                ConsumeHumanizedDelay();
+                ConsumeHumanizedDelay("register");
+                ConsumeHumanizedDelay("postReg");
             }
         }
     }
@@ -422,6 +432,7 @@ public class KTGAutomationManager
             CurrentStatus = "In Keybound Square (Waiting for queue confirmation...)";
             return;
         }
+        ConsumeHumanizedDelay("postReg");
 
         CurrentStatus = "In Keybound Square";
 
@@ -437,7 +448,7 @@ public class KTGAutomationManager
                 {
                     ECommons.Automation.Callback.Fire(talk, true, 0);
                     _lastActionTime = DateTime.UtcNow;
-                    ConsumeHumanizedDelay();
+                    ConsumeHumanizedDelay("talk");
                 }
                 return;
             }
@@ -460,30 +471,8 @@ public class KTGAutomationManager
             return;
         }
 
-        // Find Registrar
-        Dalamud.Game.ClientState.Objects.Types.IGameObject? registrar = null;
-
-        // Fast path: Current target is already Keybound Registrar
-        if (Svc.Targets.Target != null &&
-            KTGLocalizationRegistry.IsRegistrar(Svc.Targets.Target.BaseId, Svc.Targets.Target.Name.TextValue))
-        {
-            registrar = Svc.Targets.Target;
-        }
-        else
-        {
-            // Full enumeration of all game objects (including EventNPCs > index 200)
-            foreach (var obj in Svc.Objects)
-            {
-                if (obj == null) continue;
-
-                if (KTGLocalizationRegistry.IsRegistrar(obj.BaseId, obj.Name.TextValue))
-                {
-                    registrar = obj;
-                    break;
-                }
-            }
-        }
-
+        // Find Registrar via unified registry search
+        var registrar = KTGLocalizationRegistry.FindNearbyRegistrar(12.0f, out var distance);
         if (registrar == null)
         {
             CurrentStatus = "In Keybound Square (Registrar not in range)";
@@ -491,15 +480,10 @@ public class KTGAutomationManager
         }
 
         // Distance check: must be within 7 yalms
-        var localPlayer = Svc.Objects.LocalPlayer;
-        if (localPlayer != null)
+        if (distance > 7.0f)
         {
-            var distance = System.Numerics.Vector3.Distance(localPlayer.Position, registrar.Position);
-            if (distance > 7.0f)
-            {
-                CurrentStatus = $"In Keybound Square (Registrar is {distance:F1}y away - walk closer)";
-                return;
-            }
+            CurrentStatus = $"In Keybound Square (Registrar is {distance:F1}y away - walk closer)";
+            return;
         }
 
         // Step 1: Ensure registrar is actively targeted first
@@ -516,10 +500,11 @@ public class KTGAutomationManager
             FFXIVClientStructs.FFXIV.Client.Game.Control.TargetSystem.Instance()->InteractWithObject((FFXIVClientStructs.FFXIV.Client.Game.Object.GameObject*)registrar.Address, false);
         }
 
+        var delayInteract = GetHumanizedDelay("npcInteract", 1.0f, 1.5f);
         CurrentStatus = "In Keybound Square (Interacting with Registrar...)";
-        _log.Information($"[AutoKeyboundBrawler] Auto-interacted with Keybound Registrar (waited {_rolledDelayMs}ms).");
+        _log.Information($"[AutoKeyboundBrawler] Auto-interacted with Keybound Registrar (waited {delayInteract}ms).");
         _lastActionTime = DateTime.UtcNow;
-        ConsumeHumanizedDelay();
+        ConsumeHumanizedDelay("npcInteract");
     }
 
     public void Reset()
@@ -533,6 +518,7 @@ public class KTGAutomationManager
         ConsumeHumanizedDelay();
         AddonKTGEnemyCastBar.Reset();
         KTGStateReader.ClearCache();
+        CurrentPhase = EventPhase.None;
         CurrentStatus = "Reset";
     }
 }
