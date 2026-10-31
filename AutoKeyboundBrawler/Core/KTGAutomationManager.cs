@@ -1,5 +1,6 @@
 using AutoKeyboundBrawler.Data;
 using AutoKeyboundBrawler.Interop;
+using Dalamud.Plugin;
 using Dalamud.Plugin.Services;
 using ECommons.DalamudServices;
 using System;
@@ -15,6 +16,15 @@ public class KTGAutomationManager
         SendEnter,
         WaitAfterEnter,
         WaitAfterEscape
+    }
+
+    public enum SquareSubPhase
+    {
+        Default,
+        WalkingToTrader,
+        InteractingTrader,
+        Shopping,
+        WalkingToRegistrar
     }
 
     private readonly Configuration _config;
@@ -49,15 +59,25 @@ public class KTGAutomationManager
                                   CurrentStatus.Contains("Queued") || CurrentStatus.Contains("Commencing") || CurrentStatus.Contains("Registration");
     public bool IsHaltStatus => CurrentStatus.StartsWith("SAFETY") || CurrentStatus.Contains("Halt") || CurrentStatus.Contains("Obstruction");
 
-    public KTGAutomationManager(Configuration config, IPluginLog? log)
+    private readonly KTGNavigationManager _nav;
+    private SquareSubPhase _squareSubPhase = SquareSubPhase.Default;
+    public SquareSubPhase CurrentSquareSubPhase => _squareSubPhase;
+    public bool IsNavigationReady => _nav.IsVNavReady;
+
+    public KTGAutomationManager(Configuration config, IDalamudPluginInterface? pi, IPluginLog? log)
     {
         _config = config;
         _log = log;
+        _nav = new KTGNavigationManager(pi, config, log);
+    }
+
+    public KTGAutomationManager(Configuration config, IPluginLog? log) : this(config, null, log)
+    {
     }
 
     public void Tick()
     {
-        var isActive = _config.Enabled && (_config.MinigameAutoplay || _config.AutoLoopEnabled);
+        var isActive = _config.Enabled && (_config.MinigameAutoplay || _config.AutoLoopEnabled || _config.AutoBuyCoffers);
         if (!isActive)
         {
             CurrentPhase = EventPhase.None;
@@ -65,6 +85,12 @@ public class KTGAutomationManager
             if (_simulator.IsTyping)
             {
                 _simulator.Clear();
+            }
+            if (_squareSubPhase != SquareSubPhase.Default)
+            {
+                _nav.Stop();
+                AddonKTGShop.CloseShop();
+                _squareSubPhase = SquareSubPhase.Default;
             }
             _lastTargetSlotId = -1;
             _lastTargetWord = string.Empty;
@@ -426,6 +452,20 @@ public class KTGAutomationManager
         }
     }
 
+    private static unsafe int GetEmptyBagSlots()
+    {
+        try
+        {
+            var inv = FFXIVClientStructs.FFXIV.Client.Game.InventoryManager.Instance();
+            if (inv != null)
+            {
+                return (int)inv->GetEmptySlotsInBag();
+            }
+        }
+        catch { }
+        return 1;
+    }
+
     private void HandleInSquarePhase()
     {
         if (_simulator.IsTyping) _simulator.Clear();
@@ -435,14 +475,210 @@ public class KTGAutomationManager
         _haltRecoveryState = HaltRecoveryState.None;
         KTGStateReader.ClearCache();
 
-        // 1. If currently queued in Duty Finder, do NOT talk to the NPC!
+        // 1. If currently queued in Duty Finder, do NOT talk to any NPC or shop!
         if (KTGStateReader.IsQueuedForDuty())
         {
             CurrentStatus = "In Keybound Square (Queued for match...)";
+            if (_squareSubPhase != SquareSubPhase.Default)
+            {
+                _nav.Stop();
+                AddonKTGShop.CloseShop();
+                _squareSubPhase = SquareSubPhase.Default;
+            }
             return;
         }
 
-        // 2. Humanized cooldown after registering (gives server time to acknowledge queue,
+        // 2. If user unchecked Auto-Buy Coffers while in an auto-buy subphase, immediately abort!
+        if (!_config.AutoBuyCoffers && _squareSubPhase != SquareSubPhase.Default)
+        {
+            _nav.Stop();
+            AddonKTGShop.CloseShop();
+            _squareSubPhase = SquareSubPhase.Default;
+            _log?.Information("[AutoKeyboundBrawler] Auto-Buy Coffers was disabled by user. Movement and shopping cancelled.");
+        }
+
+        // 3. Check Auto-Buy Coffers trigger (MGC >= AutoBuyThreshold)
+        var (mgcCount, _) = KTGCurrencyReader.GetMGC();
+        if (_config.AutoBuyCoffers && _nav.IsVNavReady && mgcCount >= (uint)_config.AutoBuyThreshold && _squareSubPhase == SquareSubPhase.Default)
+        {
+            var emptySlots = GetEmptyBagSlots();
+            if (emptySlots <= 0)
+            {
+                CurrentStatus = "In Keybound Square (Inventory full - pausing coffer buy)";
+            }
+            else
+            {
+                _squareSubPhase = SquareSubPhase.WalkingToTrader;
+                _nav.NavigateTo(KTGLocalizationRegistry.TraderWaypoint, 2.0f);
+                _lastActionTime = DateTime.UtcNow;
+                CurrentStatus = $"Walking to MGC Trader (MGC: {mgcCount:N0})...";
+                return;
+            }
+        }
+
+        // 4. Handle Auto-Buy Subphases (independent of AutoLoopEnabled!)
+        switch (_squareSubPhase)
+        {
+            case SquareSubPhase.WalkingToTrader:
+                HandleWalkingToTrader();
+                return;
+
+            case SquareSubPhase.InteractingTrader:
+                HandleInteractingTrader();
+                return;
+
+            case SquareSubPhase.Shopping:
+                HandleShoppingPhase(mgcCount);
+                return;
+
+            case SquareSubPhase.WalkingToRegistrar:
+                HandleWalkingToRegistrar();
+                return;
+        }
+
+        // 5. Default subphase: Registrar interaction & queue loop (only if AutoLoopEnabled!)
+        CurrentStatus = "In Keybound Square";
+        if (!_config.AutoLoopEnabled)
+        {
+            return;
+        }
+
+        HandleRegistrarLoop();
+    }
+
+    private void HandleWalkingToTrader()
+    {
+        _nav.Update();
+        var trader = KTGLocalizationRegistry.FindNearbyTrader(15.0f, out var distTrader);
+        if (distTrader <= 2.5f || !_nav.IsNavigating)
+        {
+            _nav.Stop();
+            _squareSubPhase = SquareSubPhase.InteractingTrader;
+            _lastActionTime = DateTime.UtcNow;
+            CurrentStatus = "In Keybound Square (Arrived at MGC Trader)";
+        }
+        else
+        {
+            CurrentStatus = $"Walking to MGC Trader ({distTrader:F1}y left)...";
+        }
+    }
+
+    private void HandleInteractingTrader()
+    {
+        if (AddonKTGShop.IsShopOpen())
+        {
+            _squareSubPhase = SquareSubPhase.Shopping;
+            CurrentStatus = "Shopping at MGC Trader...";
+            return;
+        }
+
+        if (AddonKTGShop.HandleOpeningDialogue())
+        {
+            _lastActionTime = DateTime.UtcNow;
+            CurrentStatus = "Opening MGC Trader Shop...";
+            return;
+        }
+
+        var trader = KTGLocalizationRegistry.FindNearbyTrader(7.0f, out var distTrader);
+        if (trader == null)
+        {
+            _squareSubPhase = SquareSubPhase.WalkingToTrader;
+            _nav.NavigateTo(KTGLocalizationRegistry.TraderWaypoint, 2.0f);
+            return;
+        }
+
+        if (Svc.Targets != null && Svc.Targets.Target?.Address != trader.Address)
+        {
+            Svc.Targets.Target = trader;
+            CurrentStatus = "Targeting MGC Trader...";
+            return;
+        }
+
+        if (IsHumanizedReady("traderInteract", _lastActionTime, 0.8f, 1.2f))
+        {
+            try
+            {
+                unsafe
+                {
+                    var targetSystem = FFXIVClientStructs.FFXIV.Client.Game.Control.TargetSystem.Instance();
+                    if (targetSystem != null)
+                    {
+                        targetSystem->InteractWithObject((FFXIVClientStructs.FFXIV.Client.Game.Object.GameObject*)trader.Address, false);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _log?.Verbose(ex, "[AutoKeyboundBrawler] InteractWithObject Trader threw");
+            }
+
+            _lastActionTime = DateTime.UtcNow;
+            ConsumeHumanizedDelay("traderInteract");
+            CurrentStatus = "Interacting with MGC Trader...";
+        }
+    }
+
+    private void HandleShoppingPhase(uint mgcCount)
+    {
+        var emptySlots = GetEmptyBagSlots();
+        if (mgcCount < KTGLocalizationRegistry.KeyboundCofferCost || emptySlots <= 0)
+        {
+            _log?.Information($"[AutoKeyboundBrawler] Finished buying coffers (MGC: {mgcCount}, empty slots: {emptySlots}). Closing shop and returning to Registrar.");
+            AddonKTGShop.CloseShop();
+            _squareSubPhase = SquareSubPhase.WalkingToRegistrar;
+            _nav.NavigateTo(KTGLocalizationRegistry.RegistrarWaypoint, 2.0f);
+            _lastActionTime = DateTime.UtcNow;
+            CurrentStatus = "Returning to Keybound Registrar...";
+            return;
+        }
+
+        if (!AddonKTGShop.IsShopOpen())
+        {
+            if (AddonKTGShop.HandleOpeningDialogue())
+            {
+                _lastActionTime = DateTime.UtcNow;
+            }
+            CurrentStatus = "Waiting for Shop window...";
+            return;
+        }
+
+        if (IsHumanizedReady("buyCoffer", _lastActionTime, 0.4f, 0.7f))
+        {
+            if (AddonKTGShop.BuyOneCoffer())
+            {
+                _lastActionTime = DateTime.UtcNow;
+                ConsumeHumanizedDelay("buyCoffer");
+                CurrentStatus = $"Purchased Keybound Coffer (Remaining MGC: {mgcCount:N0})...";
+            }
+        }
+    }
+
+    private void HandleWalkingToRegistrar()
+    {
+        if (AddonKTGShop.IsShopOpen() || AddonKTGShop.IsDialogueOpen())
+        {
+            AddonKTGShop.CloseShop();
+        }
+
+        _nav.Update();
+        var registrar = KTGLocalizationRegistry.FindNearbyRegistrar(15.0f, out var distReg);
+        if (distReg <= 2.5f || !_nav.IsNavigating)
+        {
+            _nav.Stop();
+            _squareSubPhase = SquareSubPhase.Default;
+            _lastActionTime = DateTime.UtcNow;
+            CurrentStatus = "In Keybound Square";
+            _log?.Information("[AutoKeyboundBrawler] Returned to Keybound Registrar.");
+        }
+        else
+        {
+            CurrentStatus = $"Returning to Registrar ({distReg:F1}y left)...";
+        }
+    }
+
+    private void HandleRegistrarLoop()
+    {
+        // 1. Humanized cooldown after registering (gives server time to acknowledge queue,
         //    with natural variance so re-registration doesn't look robotic)
         var postRegDelay = GetHumanizedDelay("postReg", 1.8f, 3.5f);
         if ((DateTime.UtcNow - _lastRegistrationTime).TotalMilliseconds < postRegDelay)
@@ -454,13 +690,7 @@ public class KTGAutomationManager
 
         CurrentStatus = "In Keybound Square";
 
-        // If AFK Loop is not enabled, do not interact with NPCs or advance dialogues in the Square
-        if (!_config.AutoLoopEnabled)
-        {
-            return;
-        }
-
-        // 3. Advance NPC talk dialog if open (with humanized read delay)
+        // 2. Advance NPC talk dialog if open (with humanized read delay)
         try
         {
             unsafe
@@ -504,18 +734,24 @@ public class KTGAutomationManager
         }
 
         // Find Registrar via unified registry search
-        var registrar = KTGLocalizationRegistry.FindNearbyRegistrar(12.0f, out var distance);
+        var registrar = KTGLocalizationRegistry.FindNearbyRegistrar(15.0f, out var distance);
         if (registrar == null)
         {
             CurrentStatus = "In Keybound Square (Registrar not in range)";
             return;
         }
 
-        // Distance check: must be within 7 yalms
+        // Distance check: must be within 7 yalms. If farther, navigate to RegistrarWaypoint
         if (distance > 7.0f)
         {
-            CurrentStatus = $"In Keybound Square (Registrar is {distance:F1}y away - walk closer)";
+            _nav.NavigateTo(KTGLocalizationRegistry.RegistrarWaypoint, 2.0f);
+            _nav.Update();
+            CurrentStatus = $"In Keybound Square (Walking to Registrar: {distance:F1}y away)";
             return;
+        }
+        else if (_nav.IsNavigating)
+        {
+            _nav.Stop();
         }
 
         // Step 1: Ensure registrar is actively targeted first
@@ -553,6 +789,8 @@ public class KTGAutomationManager
     public void Reset()
     {
         _simulator.Clear();
+        _nav.Stop();
+        _squareSubPhase = SquareSubPhase.Default;
         _lastTargetSlotId = -1;
         _lastRegistrationTime = DateTime.MinValue;
         _wasInHalt = false;

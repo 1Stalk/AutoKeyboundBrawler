@@ -186,6 +186,14 @@ public class MainWindow : Window, IDisposable
                 _config.Save();
             }
 
+            var autoBuy = _config.AutoBuyCoffers;
+            var vnavStatus = _automation.IsNavigationReady ? Loc.Get("VnavReady") : Loc.Get("VnavNotReady");
+            if (FF7ToggleSwitch.DrawRow("##auto_buy_coffers", Loc.Get("AutoBuyCoffers"), vnavStatus, ref autoBuy,
+                FF7RTheme.AtbGold, Loc.Get("AutoBuyCoffersTip")))
+            {
+                _config.SetAutoBuyCoffers(autoBuy);
+            }
+
             // 3. Section: SPEED
             DrawSectionLabel(dl, Loc.Get("Speed"), contentWidth, scale);
 

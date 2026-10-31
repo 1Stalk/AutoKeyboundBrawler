@@ -29,6 +29,8 @@ public class Configuration : IPluginConfiguration
     public bool AutoConfirmRegister { get; set; } = false;
     public bool AutoCommenceDuty { get; set; } = true;
     public bool AutoLeaveResults { get; set; } = true;
+    public bool AutoBuyCoffers { get; set; } = false;
+    public int AutoBuyThreshold { get; set; } = 1000; // 1000 for testing (change to 9000 for release)
 
     // Humanized AFK Loop Delays (ms) — randomized delays between loop actions
     public int LoopDelayMinMs { get; set; } = 1200;
@@ -81,13 +83,13 @@ public class Configuration : IPluginConfiguration
             AutoLeaveResults = false;
         }
 
-        Enabled = MinigameAutoplay || AutoLoopEnabled;
+        Enabled = MinigameAutoplay || AutoLoopEnabled || AutoBuyCoffers;
     }
 
     public void SetMinigameAutoplay(bool val)
     {
         MinigameAutoplay = val;
-        Enabled = MinigameAutoplay || AutoLoopEnabled;
+        Enabled = MinigameAutoplay || AutoLoopEnabled || AutoBuyCoffers;
         Save();
     }
 
@@ -98,7 +100,14 @@ public class Configuration : IPluginConfiguration
         AutoConfirmRegister = val;
         AutoCommenceDuty = val;
         AutoLeaveResults = val;
-        Enabled = MinigameAutoplay || AutoLoopEnabled;
+        Enabled = MinigameAutoplay || AutoLoopEnabled || AutoBuyCoffers;
+        Save();
+    }
+
+    public void SetAutoBuyCoffers(bool val)
+    {
+        AutoBuyCoffers = val;
+        Enabled = MinigameAutoplay || AutoLoopEnabled || AutoBuyCoffers;
         Save();
     }
 

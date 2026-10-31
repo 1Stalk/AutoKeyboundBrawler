@@ -43,7 +43,7 @@ public sealed class Plugin : IDalamudPlugin
         KTGWordDatabase.Load(Svc.Data, Svc.Log);
 
         // Core Automation Manager
-        _automation = new KTGAutomationManager(Configuration, Svc.Log);
+        _automation = new KTGAutomationManager(Configuration, _pluginInterface, Svc.Log);
 
         // UI Window
         _mainWindow = new MainWindow(Configuration, _automation);

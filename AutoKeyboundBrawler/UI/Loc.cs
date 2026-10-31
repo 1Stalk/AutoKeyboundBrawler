@@ -87,6 +87,31 @@ public static class Loc
             ("AutoOpenRegTip", ClientLanguage.French) => "Ouvre automatiquement cette interface lorsque vous vous approchez de la préposée.",
             ("AutoOpenRegTip", _) => "Automatically opens this interface whenever you approach the Keybound Registrar NPC.",
 
+            ("AutoBuyCoffers", ClientLanguage.Japanese) => "コッファー自動購入",
+            ("AutoBuyCoffers", ClientLanguage.German) => "Kassetten autom. kaufen",
+            ("AutoBuyCoffers", ClientLanguage.French) => "Achat auto de coffres",
+            ("AutoBuyCoffers", _) => "Auto-Buy Coffers",
+
+            ("AutoBuyCoffersSub", ClientLanguage.Japanese) => "MGCでコッファーを自動購入",
+            ("AutoBuyCoffersSub", ClientLanguage.German) => "Tauscht MGC autom. gegen Kassetten",
+            ("AutoBuyCoffersSub", ClientLanguage.French) => "Échange auto de MGC contre des coffres",
+            ("AutoBuyCoffersSub", _) => "Automatically exchange MGC for coffers",
+
+            ("VnavReady", ClientLanguage.Japanese) => "vnavmesh: 準備完了",
+            ("VnavReady", ClientLanguage.German) => "vnavmesh: bereit",
+            ("VnavReady", ClientLanguage.French) => "vnavmesh: prêt",
+            ("VnavReady", _) => "vnavmesh: ready",
+
+            ("VnavNotReady", ClientLanguage.Japanese) => "vnavmesh: 未準備 (必要)",
+            ("VnavNotReady", ClientLanguage.German) => "vnavmesh: nicht bereit (erforderlich)",
+            ("VnavNotReady", ClientLanguage.French) => "vnavmesh: non prêt (requis)",
+            ("VnavNotReady", _) => "vnavmesh: not ready (required)",
+
+            ("AutoBuyCoffersTip", ClientLanguage.Japanese) => "MGC Traderへ移動してコッファーを購入し、受付に戻ります。",
+            ("AutoBuyCoffersTip", ClientLanguage.German) => "Läuft zur MGC-Händlerin, kauft Kassetten und kehrt zurück.",
+            ("AutoBuyCoffersTip", ClientLanguage.French) => "Va chez la négociante, achète des coffres et revient à la préposée.",
+            ("AutoBuyCoffersTip", _) => "Walks to MGC Trader to purchase coffers, then returns to Registrar.",
+
             ("IgnorePunct", ClientLanguage.Japanese) => "句読点・記号の省略",
             ("IgnorePunct", ClientLanguage.German) => "Satzzeichen ignorieren",
             ("IgnorePunct", ClientLanguage.French) => "Ignorer la ponctuation",

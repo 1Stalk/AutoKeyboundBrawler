@@ -57,13 +57,19 @@ public static unsafe class GUINodeUtils
         }
 
         var textNode = (AtkTextNode*)maybeTextNode;
-        var ptr = (byte*)textNode->NodeText.StringPtr;
-        if (ptr == null)
+        try
         {
+            return textNode->NodeText.ToString();
+        }
+        catch
+        {
+            var ptr = (byte*)textNode->NodeText.StringPtr;
+            if (ptr != null)
+            {
+                return Marshal.PtrToStringUTF8((nint)ptr);
+            }
             return null;
         }
-
-        return Marshal.PtrToStringUTF8((nint)ptr);
     }
 
     /// <summary>Diagnostic helper to dump full addon hierarchy if needed.</summary>

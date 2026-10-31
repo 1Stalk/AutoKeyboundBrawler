@@ -71,7 +71,16 @@ internal static class FF7ToggleSwitch
         }
     }
 
-    public static bool DrawRow(string id, string title, string description, ref bool value, Vector4? activeColor = null, string? tooltip = null)
+    public static bool DrawRow(
+        string id,
+        string title,
+        string description,
+        ref bool value,
+        Vector4? activeColor = null,
+        string? tooltip = null,
+        string? badgeText = null,
+        Vector4? badgeColor = null,
+        bool disabled = false)
     {
         var scale = ImGuiHelpers.GlobalScale;
         var origin = ImGui.GetCursorScreenPos();
@@ -84,17 +93,17 @@ internal static class FF7ToggleSwitch
         var boxSize = new Vector2(availWidth, rowH);
 
         var hit = Hit.Area(id + "_row", boxSize);
-        var hover = Motion.Hover(Motion.Key(id + "_row"), hit.Hovered);
+        var hover = disabled ? 0f : Motion.Hover(Motion.Key(id + "_row"), hit.Hovered);
         var dl = ImGui.GetWindowDrawList();
 
         // Subtle row hover background
-        if (hover > 0.01f)
+        if (hover > 0.01f && !disabled)
         {
             Paint.Fill(dl, origin, origin + boxSize, FF7RTheme.WithAlpha(FF7RTheme.Surface1, hover * 0.5f), 3f * scale);
         }
 
         var changed = false;
-        if (hit.Clicked)
+        if (!disabled && hit.Clicked)
         {
             value = !value;
             changed = true;
@@ -104,22 +113,43 @@ internal static class FF7ToggleSwitch
         var textLeft = origin.X + 6f * scale;
         var textTop = origin.Y + (rowH - titleH) * 0.5f;
 
-        var titleCol = value ? FF7RTheme.TextStrong : FF7RTheme.TextSecondary;
+        var titleCol = disabled ? FF7RTheme.TextMuted : (value ? FF7RTheme.TextStrong : FF7RTheme.TextSecondary);
         dl.AddText(new Vector2(textLeft, textTop), Paint.Col(titleCol), title);
 
         // Draw Switch aligned to right
         var switchPos = new Vector2(origin.X + availWidth - switchSize.X - 6f * scale, origin.Y + (rowH - switchSize.Y) * 0.5f);
-        RenderSwitch(id, value, switchPos, switchSize, scale, hover, activeColor);
+
+        // Optional technical status text (right-aligned against switch, subtle plain colored text without frame)
+        if (!string.IsNullOrEmpty(badgeText))
+        {
+            var bSize = ImGui.CalcTextSize(badgeText);
+            var bCol = badgeColor ?? (disabled ? FF7RTheme.WithAlpha(FF7RTheme.LimitRed, 0.70f) : FF7RTheme.WithAlpha(FF7RTheme.MakoCyan, 0.60f));
+            var bX = switchPos.X - bSize.X - 8f * scale;
+            dl.AddText(new Vector2(bX, textTop), Paint.Col(bCol), badgeText);
+        }
+
+        if (disabled)
+        {
+            RenderSwitch(id, false, switchPos, switchSize, scale, 0f, FF7RTheme.TextMuted);
+        }
+        else
+        {
+            RenderSwitch(id, value, switchPos, switchSize, scale, hover, activeColor);
+        }
 
         // Advance cursor
         ImGui.SetCursorScreenPos(new Vector2(origin.X, origin.Y + rowH + 2f * scale));
 
-        // Tooltip: show description (if any) + explicit tooltip
+        // Tooltip: show description (if any) + explicit tooltip + disabled notice
         if (hit.Hovered)
         {
             var tip = "";
             if (!string.IsNullOrEmpty(description)) tip = description;
             if (!string.IsNullOrEmpty(tooltip)) tip = string.IsNullOrEmpty(tip) ? tooltip : $"{tip}\n{tooltip}";
+            if (disabled && !string.IsNullOrEmpty(badgeText))
+            {
+                tip = string.IsNullOrEmpty(tip) ? $"Disabled: {badgeText}" : $"{tip}\n[!] Requires vnavmesh plugin.";
+            }
             if (!string.IsNullOrEmpty(tip)) ImGui.SetTooltip(tip);
         }
 

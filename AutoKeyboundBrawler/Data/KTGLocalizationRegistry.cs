@@ -109,6 +109,146 @@ public static class KTGLocalizationRegistry
     }
 
     // ------------------------------------------------------------------------
+    // 1b. NPC Identification (MGC Trader) & Item Constants
+    // ------------------------------------------------------------------------
+    public const uint MgcTraderDataId = 1058753;
+    public const uint KeyboundCofferItemId = 52450;
+    public const uint KeyboundCofferCost = 910;
+
+    // Interaction waypoints located in front of NPC desks (avoids running into collision)
+    public static readonly Vector3 RegistrarWaypoint = new(-10.6f, 0.1f, -30.8f);
+    public static readonly Vector3 TraderWaypoint = new(6.8f, 0.0f, -29.1f);
+
+    public static readonly string[] LocalizedTraderNames =
+    [
+        "MGC trader",                           // English
+        "参加賞交換",                            // Japanese
+        "MGC-Händlerin",                        // German
+        "négociante en crédits du Gold Saucer"  // French
+    ];
+
+    public static readonly string[] LocalizedOthersTabNames =
+    [
+        "Others",   // English
+        "Other",
+        "その他",    // Japanese
+        "Sonstiges",// German
+        "Autres",   // French
+        "Autre"
+    ];
+
+    public static bool IsOthersTabText(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return false;
+        foreach (var name in LocalizedOthersTabNames)
+        {
+            if (text.Contains(name, StringComparison.OrdinalIgnoreCase)) return true;
+        }
+        return false;
+    }
+
+    public static readonly string[] LocalizedKeyboundCofferNames =
+    [
+        "Keybound Coffer",
+        "Keybound coffer",
+        "参加賞コンテナ",
+        "Keybound-Kiste",
+        "Coffre du défi de frappe rapide",
+        "Coffer",
+        "コンテナ",
+        "Kiste",
+        "Coffre"
+    ];
+
+    public static bool IsKeyboundCofferText(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return false;
+        foreach (var name in LocalizedKeyboundCofferNames)
+        {
+            if (text.Contains(name, StringComparison.OrdinalIgnoreCase)) return true;
+        }
+        return false;
+    }
+
+    public static bool IsTrader(uint dataId, string? name = null)
+    {
+        if (dataId == MgcTraderDataId)
+        {
+            return true;
+        }
+
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return false;
+        }
+
+        foreach (var trName in LocalizedTraderNames)
+        {
+            if (name.Contains(trName, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    public static bool IsTrader(IGameObject? obj)
+    {
+        if (obj == null) return false;
+        if (obj.BaseId == MgcTraderDataId) return true;
+        return IsTrader(obj.BaseId, obj.Name.TextValue);
+    }
+
+    public static IGameObject? FindNearbyTrader(float maxDistance, out float distance)
+    {
+        distance = float.MaxValue;
+        if (Svc.Objects == null) return null;
+        var localPlayer = Svc.Objects.LocalPlayer;
+        if (localPlayer == null) return null;
+
+        var playerPos = localPlayer.Position;
+        IGameObject? closestTrader = null;
+        var minDistance = float.MaxValue;
+
+        var target = Svc.Targets?.Target;
+        if (target != null && IsTrader(target))
+        {
+            var d = Vector3.Distance(playerPos, target.Position);
+            if (d <= 7.0f)
+            {
+                distance = d;
+                return target;
+            }
+
+            if (d <= maxDistance)
+            {
+                minDistance = d;
+                closestTrader = target;
+            }
+        }
+
+        foreach (var obj in Svc.Objects)
+        {
+            if (obj == null) continue;
+
+            if (IsTrader(obj))
+            {
+                var d = Vector3.Distance(playerPos, obj.Position);
+                if (d < minDistance && d <= maxDistance)
+                {
+                    minDistance = d;
+                    closestTrader = obj;
+                    if (minDistance <= 2.0f) break;
+                }
+            }
+        }
+
+        distance = minDistance;
+        return closestTrader;
+    }
+
+    // ------------------------------------------------------------------------
     // 2. Halt Avoidance Spells (Dynamic Sensory Jammer & Cursed Gaze)
     // ------------------------------------------------------------------------
     public const uint DynamicSensoryJammerActionId = 49702;
