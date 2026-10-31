@@ -38,9 +38,9 @@ public class Configuration : IPluginConfiguration
 
     // Typing parameters (Simulated human typing)
     public bool SimulateHumanTyping { get; set; } = true;
-    public int CharDelayMinMs { get; set; } = 35;
-    public int CharDelayMaxMs { get; set; } = 75;
-    public int SubmissionDelayMs { get; set; } = 80;
+    public int CharDelayMinMs { get; set; } = 75;
+    public int CharDelayMaxMs { get; set; } = 180;
+    public int SubmissionDelayMs { get; set; } = 105;
     public bool IgnorePunctuation { get; set; } = true;
 
     // Safety guards

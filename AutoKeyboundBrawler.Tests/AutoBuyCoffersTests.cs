@@ -108,4 +108,25 @@ public class AutoBuyCoffersTests
         Assert.Contains("vnavmesh", Loc.Get("VnavReady"), StringComparison.OrdinalIgnoreCase);
         Assert.Contains("vnavmesh", Loc.Get("VnavNotReady"), StringComparison.OrdinalIgnoreCase);
     }
+
+    [Fact]
+    public void TestConfiguration_DefaultValues()
+    {
+        var config = new Configuration();
+
+        // Main Toggles
+        Assert.True(config.MinigameAutoplay);
+        Assert.False(config.AutoLoopEnabled);
+        Assert.True(config.AutoOpenNearRegistrar);
+        Assert.False(config.AutoBuyCoffers);
+
+        // Speed Delays
+        Assert.Equal(75, config.CharDelayMinMs);
+        Assert.Equal(180, config.CharDelayMaxMs);
+        Assert.Equal(105, config.SubmissionDelayMs);
+        Assert.True(config.IgnorePunctuation);
+
+        // Language
+        Assert.Null(config.SelectedLanguage);
+    }
 }
