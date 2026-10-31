@@ -30,13 +30,14 @@
 
 ## Features
 
-Multi-Language Support (EN / DE / FR / 日本語) · Humanized Typing · Smart Target Priority · Defense Preemption · Obstruction Safety · Obscured Word Memory · Punctuation Skip · AFK Duty Loop · Anti-AFK Kick Protection
+Multi-Language Support · Auto Buy Keybound Coffers · Humanized Typing · Smart Target Priority · Defense Preemption · Obstruction Safety · Obscured Word Memory · Punctuation Skip · AFK Duty Loop · Anti-AFK Kick Protection
 
 Type `/akb` in-game to open the config panel. Toggle what you need and let the solver handle the rest.
 
 ## Multi-Language Support
 
 AutoKeyboundBrawler seamlessly supports all official client localizations of FINAL FANTASY XIV:
+
 - **English (EN)**: Standard QWERTY alphanumeric solver with instant defense preemption and punctuation skipping.
 - **German (DE)**: Native QWERTZ support, direct OEM umlaut mapping (`ä`, `ö`, `ü`, `ß`), and localized Cactuar cast detection (`???-Stacheln`).
 - **French (FR)**: Full AZERTY layout support, dead-key circumflex composing (`â`, `ê`, `î`, `ô`, `û`), digit typing via Numpad (preventing top-row `&` conflicts), typographical space trimming before punctuation (`!`, `?`), and localized Cactuar cast detection (`??? Epines`).
