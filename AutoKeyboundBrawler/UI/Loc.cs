@@ -92,10 +92,10 @@ public static class Loc
             ("AutoBuyCoffers", ClientLanguage.French) => "Achat auto de coffres",
             ("AutoBuyCoffers", _) => "Auto-Buy Coffers",
 
-            ("AutoBuyCoffersSub", ClientLanguage.Japanese) => "MGCでコッファーを自動購入",
-            ("AutoBuyCoffersSub", ClientLanguage.German) => "Tauscht MGC autom. gegen Kassetten",
-            ("AutoBuyCoffersSub", ClientLanguage.French) => "Échange auto de MGC contre des coffres",
-            ("AutoBuyCoffersSub", _) => "Automatically exchange MGC for coffers",
+            ("AutoBuyCoffersSub", ClientLanguage.Japanese) => "9,500 MGC以上でコッファーを自動購入",
+            ("AutoBuyCoffersSub", ClientLanguage.German) => "Tauscht MGC autom. gegen Kassetten (ab 9.500+ MGC)",
+            ("AutoBuyCoffersSub", ClientLanguage.French) => "Échange auto de MGC contre des coffres (9 500+ MGC)",
+            ("AutoBuyCoffersSub", _) => "Automatically exchange MGC for coffers at 9,500+ MGC",
 
             ("VnavReady", ClientLanguage.Japanese) => "vnavmesh: 準備完了",
             ("VnavReady", ClientLanguage.German) => "vnavmesh: bereit",
@@ -107,10 +107,10 @@ public static class Loc
             ("VnavNotReady", ClientLanguage.French) => "vnavmesh: non prêt (requis)",
             ("VnavNotReady", _) => "vnavmesh: not ready (required)",
 
-            ("AutoBuyCoffersTip", ClientLanguage.Japanese) => "MGC Traderへ移動してコッファーを購入し、受付に戻ります。",
-            ("AutoBuyCoffersTip", ClientLanguage.German) => "Läuft zur MGC-Händlerin, kauft Kassetten und kehrt zurück.",
-            ("AutoBuyCoffersTip", ClientLanguage.French) => "Va chez la négociante, achète des coffres et revient à la préposée.",
-            ("AutoBuyCoffersTip", _) => "Walks to MGC Trader to purchase coffers, then returns to Registrar.",
+            ("AutoBuyCoffersTip", ClientLanguage.Japanese) => "9,500 MGC以上でMGC Traderへ移動してコッファーを購入し、受付に戻ります。",
+            ("AutoBuyCoffersTip", ClientLanguage.German) => "Ab 9.500+ MGC: Läuft zur MGC-Händlerin, kauft Kassetten und kehrt zurück.",
+            ("AutoBuyCoffersTip", ClientLanguage.French) => "À 9 500+ MGC : va chez la négociante acheter des coffres, puis revient à la préposée.",
+            ("AutoBuyCoffersTip", _) => "At 9,500+ MGC, walks to MGC Trader to purchase coffers, then returns to Registrar.",
 
             ("IgnorePunct", ClientLanguage.Japanese) => "句読点・記号の省略",
             ("IgnorePunct", ClientLanguage.German) => "Satzzeichen ignorieren",

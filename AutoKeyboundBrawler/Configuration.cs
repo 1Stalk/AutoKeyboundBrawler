@@ -30,7 +30,7 @@ public class Configuration : IPluginConfiguration
     public bool AutoCommenceDuty { get; set; } = true;
     public bool AutoLeaveResults { get; set; } = true;
     public bool AutoBuyCoffers { get; set; } = false;
-    public int AutoBuyThreshold { get; set; } = 1000; // 1000 for testing (change to 9000 for release)
+    public int AutoBuyThreshold { get; set; } = 9500;
 
     // Humanized AFK Loop Delays (ms) — randomized delays between loop actions
     public int LoopDelayMinMs { get; set; } = 1200;
@@ -81,6 +81,11 @@ public class Configuration : IPluginConfiguration
             AutoConfirmRegister = false;
             AutoCommenceDuty = false;
             AutoLeaveResults = false;
+        }
+
+        if (AutoBuyThreshold < 9500)
+        {
+            AutoBuyThreshold = 9500;
         }
 
         Enabled = MinigameAutoplay || AutoLoopEnabled || AutoBuyCoffers;

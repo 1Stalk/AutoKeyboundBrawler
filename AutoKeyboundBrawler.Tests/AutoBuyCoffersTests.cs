@@ -76,16 +76,16 @@ public class AutoBuyCoffersTests
         {
             AutoLoopEnabled = true,
             AutoBuyCoffers = true,
-            AutoBuyThreshold = 9000
+            AutoBuyThreshold = 9500
         };
 
         // When MGC < threshold, should not trigger
-        KTGCurrencyReader.SetOverridesForTesting(8999, 10000);
+        KTGCurrencyReader.SetOverridesForTesting(9499, 10000);
         var (count, _) = KTGCurrencyReader.GetMGC();
         Assert.True(count < (uint)config.AutoBuyThreshold);
 
         // When MGC >= threshold, should trigger
-        KTGCurrencyReader.SetOverridesForTesting(9000, 10000);
+        KTGCurrencyReader.SetOverridesForTesting(9500, 10000);
         (count, _) = KTGCurrencyReader.GetMGC();
         Assert.True(count >= (uint)config.AutoBuyThreshold);
 
