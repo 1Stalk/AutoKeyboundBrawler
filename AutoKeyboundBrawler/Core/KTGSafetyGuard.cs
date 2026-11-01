@@ -23,11 +23,45 @@ public static class KTGSafetyGuard
 
     private static bool? _inEventDutyOverride;
     private static bool? _inKeyboundSquareOverride;
+    private static bool? _inCutsceneOverride;
+    private static bool? _isPlayerStunnedOverride;
 
     internal static void SetTerritoryOverridesForTesting(bool? inDuty, bool? inSquare)
     {
         _inEventDutyOverride = inDuty;
         _inKeyboundSquareOverride = inSquare;
+    }
+
+    internal static void SetCutsceneOverrideForTesting(bool? inCutscene)
+    {
+        _inCutsceneOverride = inCutscene;
+    }
+
+    internal static void SetPlayerStunnedOverrideForTesting(bool? isStunned)
+    {
+        _isPlayerStunnedOverride = isStunned;
+    }
+
+    /// <summary>
+    /// Checks whether the game is currently in an event cutscene, scene transition, or loading phase.
+    /// During the wave 1->2 transition, FFXIV activates OccupiedInCutSceneEvent where normal players cannot type.
+    /// </summary>
+    public static bool IsInCutsceneOrTransition
+    {
+        get
+        {
+            if (_inCutsceneOverride.HasValue)
+            {
+                return _inCutsceneOverride.Value;
+            }
+
+            if (Svc.Condition == null) return false;
+            return Svc.Condition[ConditionFlag.OccupiedInCutSceneEvent] ||
+                   Svc.Condition[ConditionFlag.WatchingCutscene] ||
+                   Svc.Condition[ConditionFlag.WatchingCutscene78] ||
+                   Svc.Condition[ConditionFlag.BetweenAreas] ||
+                   Svc.Condition[ConditionFlag.OccupiedInEvent];
+        }
     }
 
     /// <summary>
@@ -125,6 +159,7 @@ public static class KTGSafetyGuard
 
     public static unsafe bool IsPlayerStunned()
     {
+        if (_isPlayerStunnedOverride.HasValue) return _isPlayerStunnedOverride.Value;
         if (Svc.Objects == null) return false;
         var localPlayer = Svc.Objects.LocalPlayer;
         if (localPlayer == null) return false;
@@ -157,6 +192,11 @@ public static class KTGSafetyGuard
             return false;
         }
 
+        if (IsInCutsceneOrTransition)
+        {
+            reason = "In cutscene or wave transition";
+            return false;
+        }
 
         if (config.StopOnPenaltyCast && AddonKTGEnemyCastBar.IsStopTypingActive(out var stopReason))
         {
@@ -167,6 +207,12 @@ public static class KTGSafetyGuard
         if (IsPlayerStunned())
         {
             reason = "Player is Stunned!";
+            return false;
+        }
+
+        if (!AddonKTGInput.CanAcceptInput())
+        {
+            reason = "Input disabled (wave transition or inactive)";
             return false;
         }
 

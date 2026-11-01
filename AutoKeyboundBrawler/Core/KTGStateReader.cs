@@ -248,6 +248,15 @@ public static unsafe class KTGStateReader
     }
 
     /// <summary>
+    /// Checks if a prompt word contains wildcard characters (*, ?, ？, ＊, _) indicating obscured text.
+    /// </summary>
+    public static bool IsObscuredWord(string? word)
+    {
+        if (string.IsNullOrWhiteSpace(word)) return false;
+        return word.IndexOfAny(new[] { '*', '?', '？', '＊', '_' }) >= 0;
+    }
+
+    /// <summary>
     /// Checks if an active defensive prompt is currently visible on screen.
     /// Only checks live on-screen targets (no stale cache fallback to prevent ghost typing when shield is already up).
     /// Does not block recently submitted defense words because player must type defense repeatedly in a row to raise shield.
@@ -493,19 +502,117 @@ public static unsafe class KTGStateReader
         string? recentlySubmittedWord = null,
         double recentSubmitAgeMs = 9999)
     {
+        var activeSlots = AddonKTGEWord.ReadActiveSlotIds();
         var targets = AddonKTGEWord.ReadActiveTargets();
         var activeCasts = AddonKTGEnemyCastBar.ReadActiveCasts();
 
-        // 0. ABSOLUTE TOP PRIORITY: Defensive Sentence (Player Shield)
+        // If there are no active enemy slots or prompt words on screen, no valid target exists.
+        if (activeSlots.Count == 0 && targets.Count == 0)
+        {
+            return null;
+        }
+
+        // 0. Update short-term memory cache with live visible targets on screen
+        var now = DateTime.UtcNow;
+        if (targets.Count > 0)
+        {
+            foreach (var t in targets)
+            {
+                var wordToCache = t.Word;
+                if (IsObscuredWord(wordToCache))
+                {
+                    var match = KTGWordDatabase.FindMatch(wordToCache);
+                    if (match != null)
+                    {
+                        wordToCache = match.Original;
+                    }
+                    else if (_targetCache.TryGetValue(t.SlotId, out var prev) && !string.IsNullOrWhiteSpace(prev.Word) &&
+                             !IsObscuredWord(prev.Word))
+                    {
+                        // Preserve previous un-obscured word rather than overwriting with unresolved wildcards
+                        wordToCache = prev.Word;
+                    }
+                }
+
+                if (_targetCache.TryGetValue(t.SlotId, out var existing))
+                {
+                    existing.LastSeenUtc = now;
+                    existing.ScreenY = t.ScreenY;
+                    existing.ScreenX = t.ScreenX;
+                    if (existing.Word != wordToCache && !IsObscuredWord(wordToCache))
+                    {
+                        _targetCache[t.SlotId] = new CachedTarget
+                        {
+                            SlotId = t.SlotId,
+                            Word = wordToCache,
+                            ScreenY = t.ScreenY,
+                            ScreenX = t.ScreenX,
+                            LastSeenUtc = now
+                        };
+                    }
+                }
+                else if (!IsObscuredWord(wordToCache))
+                {
+                    _targetCache[t.SlotId] = new CachedTarget
+                    {
+                        SlotId = t.SlotId,
+                        Word = wordToCache,
+                        ScreenY = t.ScreenY,
+                        ScreenX = t.ScreenX,
+                        LastSeenUtc = now
+                    };
+                }
+            }
+
+            // Only expire cache entries not seen for over 5.0 seconds or whose enemy slot despawned
+            List<int>? staleSlots = null;
+            foreach (var (slotId, cached) in _targetCache)
+            {
+                if ((now - cached.LastSeenUtc).TotalSeconds > 5.0 || (activeSlots.Count > 0 && !activeSlots.Contains(slotId)))
+                {
+                    (staleSlots ??= new()).Add(slotId);
+                }
+            }
+            if (staleSlots != null)
+            {
+                foreach (var s in staleSlots)
+                {
+                    _targetCache.Remove(s);
+                }
+            }
+        }
+
+        // 1. ABSOLUTE TOP PRIORITY: Defensive Sentence (Player Shield)
         // If an active, unsubmitted defense prompt is on screen, IMMEDIATELY select it before anything else!
         // Never targets boss first when a defense phrase is already on screen.
         if (config.PrioritizeDefense && HasActiveDefenseSentenceOnScreen(targets, activeCasts, out var defenseTarget) && defenseTarget != null)
         {
-            var match = KTGWordDatabase.FindMatch(defenseTarget.Word);
-            return defenseTarget with { Word = match?.Original ?? defenseTarget.Word };
+            var resolvedWord = defenseTarget.Word;
+            if (IsObscuredWord(resolvedWord))
+            {
+                var match = KTGWordDatabase.FindMatch(resolvedWord);
+                if (match != null)
+                {
+                    resolvedWord = match.Original;
+                }
+                else if (_targetCache.TryGetValue(defenseTarget.SlotId, out var cached) && !IsObscuredWord(cached.Word))
+                {
+                    resolvedWord = cached.Word;
+                }
+            }
+            else
+            {
+                var match = KTGWordDatabase.FindMatch(resolvedWord);
+                if (match != null) resolvedWord = match.Original;
+            }
+
+            if (!IsObscuredWord(resolvedWord))
+            {
+                return defenseTarget with { Word = resolvedWord };
+            }
         }
 
-        // 1. ABSOLUTE SECOND PRIORITY: Cactuar casting Needles (Emergency Interrupt)
+        // 2. ABSOLUTE SECOND PRIORITY: Cactuar casting Needles (Emergency Interrupt)
         // If a Cactuar is actively casting Needles / 針？本, IMMEDIATELY kill it before regular adds and boss!
         int? needlesTargetSlotId = null;
         if (HasActiveNeedlesTargetOnScreen(targets, activeCasts, out var needlesTarget) && needlesTarget != null)
@@ -520,8 +627,29 @@ public static unsafe class KTGStateReader
 
             if (!isStaleSubmittedWord)
             {
-                var match = KTGWordDatabase.FindMatch(needlesTarget.Word);
-                return needlesTarget with { Word = match?.Original ?? needlesTarget.Word };
+                var resolvedWord = needlesTarget.Word;
+                if (IsObscuredWord(resolvedWord))
+                {
+                    var match = KTGWordDatabase.FindMatch(resolvedWord);
+                    if (match != null)
+                    {
+                        resolvedWord = match.Original;
+                    }
+                    else if (_targetCache.TryGetValue(needlesTarget.SlotId, out var cached) && !IsObscuredWord(cached.Word))
+                    {
+                        resolvedWord = cached.Word;
+                    }
+                }
+                else
+                {
+                    var match = KTGWordDatabase.FindMatch(resolvedWord);
+                    if (match != null) resolvedWord = match.Original;
+                }
+
+                if (!IsObscuredWord(resolvedWord))
+                {
+                    return needlesTarget with { Word = resolvedWord };
+                }
             }
 
             // Cactuar is actively casting Needles and we are waiting for its next word to appear.
@@ -529,83 +657,62 @@ public static unsafe class KTGStateReader
             return null;
         }
 
-        // 2. If live targets are visible on screen, update our short-term memory cache
-        var now = DateTime.UtcNow;
+        // 3. Determine candidate pool
+        var candidates = new List<KTGTargetWord>();
+        var seenSlots = new HashSet<int>();
+
         if (targets.Count > 0)
         {
             foreach (var t in targets)
             {
-                if (_targetCache.TryGetValue(t.SlotId, out var existing))
+                var word = t.Word;
+                if (IsObscuredWord(word))
                 {
-                    existing.LastSeenUtc = now;
-                    existing.ScreenY = t.ScreenY;
-                    existing.ScreenX = t.ScreenX;
-                    if (existing.Word != t.Word)
+                    var match = KTGWordDatabase.FindMatch(word);
+                    if (match != null)
                     {
-                        _targetCache[t.SlotId] = new CachedTarget
-                        {
-                            SlotId = t.SlotId,
-                            Word = t.Word,
-                            ScreenY = t.ScreenY,
-                            ScreenX = t.ScreenX,
-                            LastSeenUtc = now
-                        };
+                        word = match.Original;
+                    }
+                    else if (_targetCache.TryGetValue(t.SlotId, out var cached) && !IsObscuredWord(cached.Word))
+                    {
+                        word = cached.Word;
                     }
                 }
                 else
                 {
-                    _targetCache[t.SlotId] = new CachedTarget
+                    var match = KTGWordDatabase.FindMatch(word);
+                    if (match != null)
                     {
-                        SlotId = t.SlotId,
-                        Word = t.Word,
-                        ScreenY = t.ScreenY,
-                        ScreenX = t.ScreenX,
-                        LastSeenUtc = now
-                    };
+                        word = match.Original;
+                    }
                 }
-            }
 
-            // Only expire cache entries not seen for over 5.0 seconds (prevents cache wiping during confusion debuff)
-            List<int>? staleSlots = null;
-            foreach (var (slotId, cached) in _targetCache)
-            {
-                if ((now - cached.LastSeenUtc).TotalSeconds > 5.0)
-                {
-                    (staleSlots ??= new()).Add(slotId);
-                }
-            }
-            if (staleSlots != null)
-            {
-                foreach (var s in staleSlots)
-                {
-                    _targetCache.Remove(s);
-                }
+                candidates.Add(t with { Word = word });
+                seenSlots.Add(t.SlotId);
             }
         }
 
-        // 3. Determine candidate pool
-        List<KTGTargetWord> candidates;
-        if (targets.Count > 0)
+        if (config.MemoryModeObscured && activeSlots.Count > 0)
         {
-            candidates = new List<KTGTargetWord>(targets);
-        }
-        else if (config.MemoryModeObscured)
-        {
-            // Words are currently hidden/obscured (e.g. confusion debuff or "Phrases partially obscured!")
-            // Retrieve candidates from memory cache seen within the last 4.0 seconds
-            var cutoff = now.AddSeconds(-4.0);
-            candidates = new List<KTGTargetWord>();
+            // Retrieve candidates from memory cache for active living enemy slots whose prompt text is hidden or obscured
+            var cutoff = now.AddSeconds(-5.0);
             foreach (var c in _targetCache.Values)
             {
-                if (c.LastSeenUtc >= cutoff)
+                if (!seenSlots.Contains(c.SlotId) && activeSlots.Contains(c.SlotId) && c.LastSeenUtc >= cutoff)
                 {
-                    candidates.Add(new KTGTargetWord(c.SlotId, c.Word, c.ScreenY, c.ScreenX));
+                    var word = c.Word;
+                    if (IsObscuredWord(word))
+                    {
+                        var match = KTGWordDatabase.FindMatch(word);
+                        if (match != null) word = match.Original;
+                    }
+                    if (!IsObscuredWord(word))
+                    {
+                        candidates.Add(new KTGTargetWord(c.SlotId, word, c.ScreenY, c.ScreenX));
+                        seenSlots.Add(c.SlotId);
+                    }
                 }
             }
-        }
-        else
-        {
-            return null;
         }
 
         if (candidates.Count == 0)
@@ -658,15 +765,22 @@ public static unsafe class KTGStateReader
 
         foreach (var target in candidates)
         {
-            var match = KTGWordDatabase.FindMatch(target.Word);
-            if (match != null)
+            var word = target.Word;
+            if (IsObscuredWord(word))
             {
-                return target with { Word = match.Original };
+                var match = KTGWordDatabase.FindMatch(word);
+                if (match != null)
+                {
+                    return target with { Word = match.Original };
+                }
+                // Cannot type an unresolved obscured string!
+                continue;
             }
 
-            if (target.Word.Length >= 2)
+            if (word.Length >= 2)
             {
-                return target;
+                var match = KTGWordDatabase.FindMatch(word);
+                return target with { Word = match?.Original ?? word };
             }
         }
 

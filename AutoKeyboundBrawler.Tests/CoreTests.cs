@@ -2162,6 +2162,707 @@ public class CoreTests
         Assert.Equal(0, mgr.RemainingChars);
         Assert.Equal(string.Empty, mgr.ActiveWord);
     }
+
+    [Fact]
+    public void TestKTGSafetyGuard_CanType_CutsceneAndInputReadiness()
+    {
+        try
+        {
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(inDuty: true, inSquare: false);
+            var config = new Configuration { Enabled = true, MinigameAutoplay = true, StopOnPenaltyCast = false };
+
+            // 1. Normal state -> OK
+            KTGSafetyGuard.SetCutsceneOverrideForTesting(false);
+            AddonKTGInput.SetCanAcceptInputOverrideForTesting(true);
+            Assert.True(KTGSafetyGuard.CanType(config, out var reasonOk));
+            Assert.Equal("OK", reasonOk);
+
+            // 2. Wave transition / cutscene active -> rejected
+            KTGSafetyGuard.SetCutsceneOverrideForTesting(true);
+            Assert.False(KTGSafetyGuard.CanType(config, out var reasonCutscene));
+            Assert.Equal("In cutscene or wave transition", reasonCutscene);
+
+            // 3. Cutscene ended, but input still disabled -> rejected
+            KTGSafetyGuard.SetCutsceneOverrideForTesting(false);
+            AddonKTGInput.SetCanAcceptInputOverrideForTesting(false);
+            Assert.False(KTGSafetyGuard.CanType(config, out var reasonDisabled));
+            Assert.Equal("Input disabled (wave transition or inactive)", reasonDisabled);
+        }
+        finally
+        {
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(null, null);
+            KTGSafetyGuard.SetCutsceneOverrideForTesting(null);
+            AddonKTGInput.SetCanAcceptInputOverrideForTesting(null);
+        }
+    }
+
+    [Fact]
+    public void TestAddonKTGInput_CanAcceptInput_BlocksDirectInputWhenDisabled()
+    {
+        try
+        {
+            AddonKTGInput.SetCanAcceptInputOverrideForTesting(false);
+            Assert.False(AddonKTGInput.CanAcceptInput());
+
+            // DirectSetText and DirectSubmit must refuse when input is not acceptable
+            Assert.False(AddonKTGInput.DirectSetText("Hello"));
+            Assert.False(AddonKTGInput.DirectSubmit(out var cleared));
+            Assert.False(cleared);
+        }
+        finally
+        {
+            AddonKTGInput.SetCanAcceptInputOverrideForTesting(null);
+        }
+    }
+
+    [Fact]
+    public void TestKTGStateReader_GetBestTarget_ZeroEnemiesReturnsNull_NoGhostMemory()
+    {
+        try
+        {
+            var config = new Configuration { MemoryModeObscured = true };
+
+            // Simulate 0 enemies on screen
+            AddonKTGEWord.SetActiveTargetsOverrideForTesting(new List<KTGTargetWord>());
+
+            var target = KTGStateReader.GetBestTarget(config);
+            Assert.Null(target);
+        }
+        finally
+        {
+            AddonKTGEWord.SetActiveTargetsOverrideForTesting(null);
+            KTGStateReader.ClearCache();
+        }
+    }
+
+    [Fact]
+    public void TestKTGAutomationManager_NoEnemies_AbortsTypingAndDoesNotSubmit()
+    {
+        try
+        {
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(inDuty: true, inSquare: false);
+            AddonKTGInput.SetCanAcceptInputOverrideForTesting(true);
+            var config = new Configuration { Enabled = true, MinigameAutoplay = true, StopOnPenaltyCast = false };
+            var manager = new KTGAutomationManager(config, null);
+
+            // Initially mob is present
+            AddonKTGEWord.SetActiveTargetsOverrideForTesting(new List<KTGTargetWord>
+            {
+                new(10, "TargetMob", 500f, 100f)
+            });
+
+            manager.Tick();
+            Assert.True(manager.IsTyping);
+            Assert.Equal("TargetMob", manager.ActiveWord);
+
+            // Now all enemies die (wave ends or cleared)
+            AddonKTGEWord.SetActiveTargetsOverrideForTesting(new List<KTGTargetWord>());
+
+            manager.Tick();
+            // Typing must be aborted immediately!
+            Assert.False(manager.IsTyping);
+            Assert.Equal(string.Empty, manager.ActiveWord);
+            Assert.Equal("In Combat (Waiting for word...)", manager.CurrentStatus);
+        }
+        finally
+        {
+            AddonKTGEWord.SetActiveTargetsOverrideForTesting(null);
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(null, null);
+            AddonKTGInput.SetCanAcceptInputOverrideForTesting(null);
+            KTGStateReader.ClearCache();
+        }
+    }
+
+    [Fact]
+    public void TestKTGAutomationManager_TargetDefeatedMidTyping_SwitchesToLivingEnemy()
+    {
+        try
+        {
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(inDuty: true, inSquare: false);
+            AddonKTGInput.SetCanAcceptInputOverrideForTesting(true);
+            var config = new Configuration { Enabled = true, MinigameAutoplay = true, StopOnPenaltyCast = false };
+            var manager = new KTGAutomationManager(config, null);
+
+            // Mob A and Mob B present. Mob A is lower on screen (closer to wall).
+            var mobA = new KTGTargetWord(10, "MobA", 600f, 100f);
+            var mobB = new KTGTargetWord(11, "MobB", 400f, 100f);
+
+            AddonKTGEWord.SetActiveTargetsOverrideForTesting(new List<KTGTargetWord> { mobA, mobB });
+            manager.Tick();
+            Assert.True(manager.IsTyping);
+            Assert.Equal("MobA", manager.ActiveWord);
+
+            // Mob A is defeated by a party member while we were typing it. Only Mob B remains!
+            AddonKTGEWord.SetActiveTargetsOverrideForTesting(new List<KTGTargetWord> { mobB });
+
+            manager.Tick();
+            // Aborted typing MobA and immediately retargeted MobB!
+            Assert.True(manager.IsTyping);
+            Assert.Equal("MobB", manager.ActiveWord);
+        }
+        finally
+        {
+            AddonKTGEWord.SetActiveTargetsOverrideForTesting(null);
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(null, null);
+            AddonKTGInput.SetCanAcceptInputOverrideForTesting(null);
+            KTGStateReader.ClearCache();
+        }
+    }
+
+    [Fact]
+    public void TestKTGAutomationManager_WaveTransition_HaltsTyping()
+    {
+        try
+        {
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(inDuty: true, inSquare: false);
+            AddonKTGInput.SetCanAcceptInputOverrideForTesting(true);
+            KTGSafetyGuard.SetCutsceneOverrideForTesting(false);
+
+            var config = new Configuration { Enabled = true, MinigameAutoplay = true, StopOnPenaltyCast = false };
+            var manager = new KTGAutomationManager(config, null);
+
+            AddonKTGEWord.SetActiveTargetsOverrideForTesting(new List<KTGTargetWord>
+            {
+                new(10, "LastWave1Mob", 500f, 100f)
+            });
+
+            manager.Tick();
+            Assert.True(manager.IsTyping);
+
+            // Wave 1 ends -> cutscene transition starts and input is disabled
+            KTGSafetyGuard.SetCutsceneOverrideForTesting(true);
+            AddonKTGInput.SetCanAcceptInputOverrideForTesting(false);
+            AddonKTGEWord.SetActiveTargetsOverrideForTesting(new List<KTGTargetWord>());
+
+            manager.Tick();
+            // Must be halted, typing cleared, not submitting!
+            Assert.False(manager.IsTyping);
+            Assert.True(manager.IsHaltStatus);
+            Assert.Contains("SAFETY HALT", manager.CurrentStatus);
+        }
+        finally
+        {
+            AddonKTGEWord.SetActiveTargetsOverrideForTesting(null);
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(null, null);
+            KTGSafetyGuard.SetCutsceneOverrideForTesting(null);
+            AddonKTGInput.SetCanAcceptInputOverrideForTesting(null);
+            KTGStateReader.ClearCache();
+        }
+    }
+
+    [Fact]
+    public void TestKTGInputSimulator_CanAcceptInputDisabled_AbortsMidTyping()
+    {
+        try
+        {
+            AddonKTGInput.SetDirectOverridesForTesting(null, null);
+            AddonKTGInput.SetCanAcceptInputOverrideForTesting(true);
+
+            var sim = new KTGInputSimulator();
+            var config = new Configuration { CharDelayMinMs = 0, CharDelayMaxMs = 0 };
+
+            sim.EnqueueWord("TEST", config);
+            Assert.True(sim.IsTyping);
+
+            // Wave transition disables input mid-word
+            AddonKTGInput.SetCanAcceptInputOverrideForTesting(false);
+            sim.Update(config);
+
+            Assert.False(sim.IsTyping);
+            Assert.Equal(0, sim.RemainingChars);
+            Assert.Equal(string.Empty, sim.CurrentWord);
+        }
+        finally
+        {
+            AddonKTGInput.SetCanAcceptInputOverrideForTesting(null);
+            AddonKTGInput.SetDirectOverridesForTesting(null, null);
+        }
+    }
+
+    [Fact]
+    public void TestKTGWordDatabase_FindMatch_PartiallyObscuredWildcards()
+    {
+        try
+        {
+            var entryPotion = new WordEntry
+            {
+                RowId = 1,
+                Original = "Potion",
+                Normalized = "potion",
+                Stripped = "potion",
+                IsDefense = false,
+                IsCactuar = false
+            };
+            var entrySonon = new WordEntry
+            {
+                RowId = 2,
+                Original = "Sonon's Theme",
+                Normalized = "sonon's theme",
+                Stripped = "sonons theme",
+                IsDefense = false,
+                IsCactuar = false
+            };
+            var entryCactuar = new WordEntry
+            {
+                RowId = 3,
+                Original = "サボテンダー",
+                Normalized = "サボテンダー",
+                Stripped = "サボテンダー",
+                IsDefense = false,
+                IsCactuar = true
+            };
+
+            KTGWordDatabase.SetTestEntries([entryPotion, entrySonon, entryCactuar]);
+
+            // 1. Single character wildcard ?
+            var matchPotion = KTGWordDatabase.FindMatch("P?ti?n");
+            Assert.NotNull(matchPotion);
+            Assert.Equal("Potion", matchPotion.Original);
+
+            // 2. Asterisk wildcard * and apostrophe stripping
+            var matchSonon = KTGWordDatabase.FindMatch("Son*n's Th*me");
+            Assert.NotNull(matchSonon);
+            Assert.Equal("Sonon's Theme", matchSonon.Original);
+
+            // 3. Japanese wildcards (fullwidth and halfwidth)
+            var matchJaAsterisk = KTGWordDatabase.FindMatch("サボ＊ンダー");
+            Assert.NotNull(matchJaAsterisk);
+            Assert.Equal("サボテンダー", matchJaAsterisk.Original);
+
+            var matchJaQuestion = KTGWordDatabase.FindMatch("サボ？ンダー");
+            Assert.NotNull(matchJaQuestion);
+            Assert.Equal("サボテンダー", matchJaQuestion.Original);
+
+            // 4. Pure wildcards without letters must not match random words
+            Assert.Null(KTGWordDatabase.FindMatch("???"));
+            Assert.Null(KTGWordDatabase.FindMatch("*****"));
+            Assert.Null(KTGWordDatabase.FindMatch("   "));
+            Assert.Null(KTGWordDatabase.FindMatch(null!));
+        }
+        finally
+        {
+            KTGWordDatabase.SetTestEntries(null);
+        }
+    }
+
+    [Fact]
+    public void TestKTGStateReader_GetBestTarget_ObscuredWords_MemoryCacheResolution()
+    {
+        try
+        {
+            var config = new Configuration { MemoryModeObscured = true };
+
+            // 1. Initially mob appears on screen and is cached
+            AddonKTGEWord.SetActiveSlotsOverrideForTesting(new List<int> { 2 });
+            AddonKTGEWord.SetActiveTargetsOverrideForTesting(new List<KTGTargetWord>
+            {
+                new(2, "Airbuster", 500f, 100f)
+            });
+
+            var targetInitial = KTGStateReader.GetBestTarget(config);
+            Assert.NotNull(targetInitial);
+            Assert.Equal("Airbuster", targetInitial.Word);
+            Assert.Equal(2, targetInitial.SlotId);
+
+            // 2. Words become obscured: prompt text node is hidden, but enemy slot 2 plate remains active
+            AddonKTGEWord.SetActiveSlotsOverrideForTesting(new List<int> { 2 });
+            AddonKTGEWord.SetActiveTargetsOverrideForTesting(new List<KTGTargetWord>());
+
+            var targetObscured = KTGStateReader.GetBestTarget(config);
+            // Must recover "Airbuster" from memory cache!
+            Assert.NotNull(targetObscured);
+            Assert.Equal("Airbuster", targetObscured.Word);
+            Assert.Equal(2, targetObscured.SlotId);
+
+            // 3. If MemoryModeObscured is disabled by user, returns null
+            var configNoMemory = new Configuration { MemoryModeObscured = false };
+            var targetNoMemory = KTGStateReader.GetBestTarget(configNoMemory);
+            Assert.Null(targetNoMemory);
+
+            // 4. When mob dies (slot 2 removed from activeSlots), cache is purged and returns null
+            AddonKTGEWord.SetActiveSlotsOverrideForTesting(new List<int>());
+            AddonKTGEWord.SetActiveTargetsOverrideForTesting(new List<KTGTargetWord>());
+
+            var targetDead = KTGStateReader.GetBestTarget(config);
+            Assert.Null(targetDead);
+        }
+        finally
+        {
+            AddonKTGEWord.SetActiveSlotsOverrideForTesting(null);
+            AddonKTGEWord.SetActiveTargetsOverrideForTesting(null);
+            KTGStateReader.ClearCache();
+        }
+    }
+
+    [Fact]
+    public void TestKTGAutomationManager_ObscuredWords_ContinuesTypingAndDoesNotCancel()
+    {
+        try
+        {
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(inDuty: true, inSquare: false);
+            AddonKTGInput.SetCanAcceptInputOverrideForTesting(true);
+            var config = new Configuration { Enabled = true, MinigameAutoplay = true, StopOnPenaltyCast = false, MemoryModeObscured = true };
+            var manager = new KTGAutomationManager(config, null);
+
+            // Mob initially appears on screen
+            AddonKTGEWord.SetActiveSlotsOverrideForTesting(new List<int> { 2 });
+            AddonKTGEWord.SetActiveTargetsOverrideForTesting(new List<KTGTargetWord>
+            {
+                new(2, "Airbuster", 500f, 100f)
+            });
+
+            manager.Tick();
+            Assert.True(manager.IsTyping);
+            Assert.Equal("Airbuster", manager.ActiveWord);
+
+            // Boss casts obscure mechanic: prompt text hides, but enemy plate 2 is still active on screen!
+            AddonKTGEWord.SetActiveSlotsOverrideForTesting(new List<int> { 2 });
+            AddonKTGEWord.SetActiveTargetsOverrideForTesting(new List<KTGTargetWord>());
+
+            manager.Tick();
+            // Bot must NOT cancel typing!
+            Assert.True(manager.IsTyping);
+            Assert.Equal("Airbuster", manager.ActiveWord);
+            Assert.Contains("Typing", manager.CurrentStatus);
+
+            // Even if prompt text comes back as wildcards ("???"), bot continues typing "Airbuster"!
+            AddonKTGEWord.SetActiveSlotsOverrideForTesting(new List<int> { 2 });
+            AddonKTGEWord.SetActiveTargetsOverrideForTesting(new List<KTGTargetWord>
+            {
+                new(2, "???", 500f, 100f)
+            });
+
+            manager.Tick();
+            Assert.True(manager.IsTyping);
+            Assert.Equal("Airbuster", manager.ActiveWord);
+        }
+        finally
+        {
+            AddonKTGEWord.SetActiveSlotsOverrideForTesting(null);
+            AddonKTGEWord.SetActiveTargetsOverrideForTesting(null);
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(null, null);
+            AddonKTGInput.SetCanAcceptInputOverrideForTesting(null);
+            KTGStateReader.ClearCache();
+        }
+    }
+
+    [Fact]
+    public void TestKTGStateReader_GetBestTarget_ObscuredWords_WithPartiallyObscuredTarget()
+    {
+        try
+        {
+            var entrySonon = new WordEntry
+            {
+                RowId = 2,
+                Original = "Sonon's Theme",
+                Normalized = "sonon's theme",
+                Stripped = "sonons theme",
+                IsDefense = false,
+                IsCactuar = false
+            };
+            KTGWordDatabase.SetTestEntries([entrySonon]);
+
+            var config = new Configuration { MemoryModeObscured = true };
+
+            // 1. Target appears on screen with wildcard "Son*n's Th*me"
+            AddonKTGEWord.SetActiveSlotsOverrideForTesting(new List<int> { 2 });
+            AddonKTGEWord.SetActiveTargetsOverrideForTesting(new List<KTGTargetWord>
+            {
+                new(2, "Son*n's Th*me", 500f, 100f)
+            });
+
+            var targetFuzzy = KTGStateReader.GetBestTarget(config);
+            Assert.NotNull(targetFuzzy);
+            Assert.Equal("Sonon's Theme", targetFuzzy.Word);
+
+            // 2. Target becomes fully obscured ("???") on next frame
+            AddonKTGEWord.SetActiveSlotsOverrideForTesting(new List<int> { 2 });
+            AddonKTGEWord.SetActiveTargetsOverrideForTesting(new List<KTGTargetWord>
+            {
+                new(2, "???", 500f, 100f)
+            });
+
+            var targetWildcard = KTGStateReader.GetBestTarget(config);
+            // Must resolve from cache as "Sonon's Theme", not "???"
+            Assert.NotNull(targetWildcard);
+            Assert.Equal("Sonon's Theme", targetWildcard.Word);
+        }
+        finally
+        {
+            KTGWordDatabase.SetTestEntries(null);
+            AddonKTGEWord.SetActiveSlotsOverrideForTesting(null);
+            AddonKTGEWord.SetActiveTargetsOverrideForTesting(null);
+            KTGStateReader.ClearCache();
+        }
+    }
+
+    [Fact]
+    public void TestKTGAutomationManager_ObscuredWords_StartsTypingFromMemoryMode()
+    {
+        try
+        {
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(inDuty: true, inSquare: false);
+            AddonKTGInput.SetCanAcceptInputOverrideForTesting(true);
+            var config = new Configuration { Enabled = true, MinigameAutoplay = true, StopOnPenaltyCast = false, MemoryModeObscured = true };
+            var manager = new KTGAutomationManager(config, null);
+
+            // Populate target cache with seen enemy
+            AddonKTGEWord.SetActiveSlotsOverrideForTesting(new List<int> { 2 });
+            AddonKTGEWord.SetActiveTargetsOverrideForTesting(new List<KTGTargetWord>
+            {
+                new(2, "Airbuster", 500f, 100f)
+            });
+            _ = KTGStateReader.GetBestTarget(config);
+
+            // Now bot is not typing yet, but words hide before typing starts: prompt text hides while slot 2 is active
+            AddonKTGEWord.SetActiveSlotsOverrideForTesting(new List<int> { 2 });
+            AddonKTGEWord.SetActiveTargetsOverrideForTesting(new List<KTGTargetWord>());
+
+            manager.Tick();
+
+            // Manager must pick Airbuster from memory cache and begin typing!
+            Assert.True(manager.IsTyping);
+            Assert.Equal("Airbuster", manager.ActiveWord);
+            Assert.Contains("Enqueued: \"Airbuster\"", manager.CurrentStatus);
+        }
+        finally
+        {
+            AddonKTGEWord.SetActiveSlotsOverrideForTesting(null);
+            AddonKTGEWord.SetActiveTargetsOverrideForTesting(null);
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(null, null);
+            AddonKTGInput.SetCanAcceptInputOverrideForTesting(null);
+            KTGStateReader.ClearCache();
+        }
+    }
+
+    [Fact]
+    public void TestKTGAutomationManager_NoEnemies_WhileObscuredCachePresent_StillAbortsAndDoesNotType()
+    {
+        try
+        {
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(inDuty: true, inSquare: false);
+            AddonKTGInput.SetCanAcceptInputOverrideForTesting(true);
+            var config = new Configuration { Enabled = true, MinigameAutoplay = true, StopOnPenaltyCast = false, MemoryModeObscured = true };
+            var manager = new KTGAutomationManager(config, null);
+
+            // Populate target cache with seen enemy
+            AddonKTGEWord.SetActiveSlotsOverrideForTesting(new List<int> { 2 });
+            AddonKTGEWord.SetActiveTargetsOverrideForTesting(new List<KTGTargetWord>
+            {
+                new(2, "Airbuster", 500f, 100f)
+            });
+            _ = KTGStateReader.GetBestTarget(config);
+
+            // All enemies die: zero active slots, zero active targets
+            AddonKTGEWord.SetActiveSlotsOverrideForTesting(new List<int>());
+            AddonKTGEWord.SetActiveTargetsOverrideForTesting(new List<KTGTargetWord>());
+
+            manager.Tick();
+
+            // Manager must NOT start typing dead enemy from cache!
+            Assert.False(manager.IsTyping);
+            Assert.Equal(string.Empty, manager.ActiveWord);
+            Assert.Equal("In Combat (Waiting for word...)", manager.CurrentStatus);
+
+            // GetBestTarget must also return null
+            Assert.Null(KTGStateReader.GetBestTarget(config));
+        }
+        finally
+        {
+            AddonKTGEWord.SetActiveSlotsOverrideForTesting(null);
+            AddonKTGEWord.SetActiveTargetsOverrideForTesting(null);
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(null, null);
+            AddonKTGInput.SetCanAcceptInputOverrideForTesting(null);
+            KTGStateReader.ClearCache();
+        }
+    }
+
+    [Fact]
+    public void TestKTGWordDatabase_FindMatch_UnderscoreWildcards()
+    {
+        try
+        {
+            var entryPotion = new WordEntry
+            {
+                RowId = 1,
+                Original = "Potion",
+                Normalized = "potion",
+                Stripped = "potion",
+                IsDefense = false,
+                IsCactuar = false
+            };
+            var entrySonon = new WordEntry
+            {
+                RowId = 2,
+                Original = "Sonon's Theme",
+                Normalized = "sonon's theme",
+                Stripped = "sonons theme",
+                IsDefense = false,
+                IsCactuar = false
+            };
+
+            KTGWordDatabase.SetTestEntries([entryPotion, entrySonon]);
+
+            // Underscore placeholder matching
+            var matchPotion = KTGWordDatabase.FindMatch("P_ti_n");
+            Assert.NotNull(matchPotion);
+            Assert.Equal("Potion", matchPotion.Original);
+
+            var matchSonon = KTGWordDatabase.FindMatch("Son_n's Th_me");
+            Assert.NotNull(matchSonon);
+            Assert.Equal("Sonon's Theme", matchSonon.Original);
+        }
+        finally
+        {
+            KTGWordDatabase.SetTestEntries(null);
+        }
+    }
+
+    [Fact]
+    public void TestKTGStateReader_GetBestTarget_MixedVisibleAndObscuredTargets()
+    {
+        try
+        {
+            var config = new Configuration { MemoryModeObscured = true, PrioritizeAdds = true };
+
+            // 1. Initial frame: Mob 20001 (boss or high Y) and Mob 20002 (dangerous add close to wall)
+            AddonKTGEWord.SetActiveSlotsOverrideForTesting(new List<int> { 20001, 20002 });
+            AddonKTGEWord.SetActiveTargetsOverrideForTesting(new List<KTGTargetWord>
+            {
+                new(20001, "Wolf", 400f, 100f),
+                new(20002, "Bomb", 600f, 100f)
+            });
+
+            _ = KTGStateReader.GetBestTarget(config); // Cache both
+
+            // 2. Mob 20002 becomes obscured (hidden from active targets), but is closer to wall (ScreenY 600)
+            // Mob 20001 remains visible (ScreenY 400)
+            AddonKTGEWord.SetActiveSlotsOverrideForTesting(new List<int> { 20001, 20002 });
+            AddonKTGEWord.SetActiveTargetsOverrideForTesting(new List<KTGTargetWord>
+            {
+                new(20001, "Wolf", 400f, 100f)
+            });
+
+            var best = KTGStateReader.GetBestTarget(config);
+            // Must evaluate both and pick Mob 20002 (Bomb) due to higher ScreenY proximity (600 > 400)!
+            Assert.NotNull(best);
+            Assert.Equal(20002, best.SlotId);
+            Assert.Equal("Bomb", best.Word);
+        }
+        finally
+        {
+            AddonKTGEWord.SetActiveSlotsOverrideForTesting(null);
+            AddonKTGEWord.SetActiveTargetsOverrideForTesting(null);
+            KTGStateReader.ClearCache();
+        }
+    }
+
+    [Fact]
+    public void TestKTGStateReader_GetBestTarget_ObscuredTargetWithNoPriorClearWord_DoesNotReturnWildcards()
+    {
+        try
+        {
+            var config = new Configuration { MemoryModeObscured = true };
+
+            // Mob spawns already obscured as ??? with no clear observation
+            AddonKTGEWord.SetActiveSlotsOverrideForTesting(new List<int> { 20001 });
+            AddonKTGEWord.SetActiveTargetsOverrideForTesting(new List<KTGTargetWord>
+            {
+                new(20001, "???", 500f, 100f)
+            });
+
+            var best = KTGStateReader.GetBestTarget(config);
+            // Must return null, never return raw ???
+            Assert.Null(best);
+        }
+        finally
+        {
+            AddonKTGEWord.SetActiveSlotsOverrideForTesting(null);
+            AddonKTGEWord.SetActiveTargetsOverrideForTesting(null);
+            KTGStateReader.ClearCache();
+        }
+    }
+
+    [Fact]
+    public void TestKTGStateReader_GetBestTarget_ObscuredDefenseSentence_ResolvesFromCache()
+    {
+        try
+        {
+            var config = new Configuration { MemoryModeObscured = true, PrioritizeDefense = true };
+
+            // 1. Defense word seen clearly
+            AddonKTGEWord.SetActiveSlotsOverrideForTesting(new List<int> { 100 });
+            AddonKTGEWord.SetActiveTargetsOverrideForTesting(new List<KTGTargetWord>
+            {
+                new(100, "Lustrous Shield", 734f, 100f)
+            });
+            _ = KTGStateReader.GetBestTarget(config);
+
+            // 2. Defense word obscures to ??? during cast
+            AddonKTGEWord.SetActiveSlotsOverrideForTesting(new List<int> { 100 });
+            AddonKTGEWord.SetActiveTargetsOverrideForTesting(new List<KTGTargetWord>
+            {
+                new(100, "???", 734f, 100f)
+            });
+
+            var best = KTGStateReader.GetBestTarget(config);
+            Assert.NotNull(best);
+            Assert.Equal("Lustrous Shield", best.Word);
+            Assert.Equal(100, best.SlotId);
+        }
+        finally
+        {
+            AddonKTGEWord.SetActiveSlotsOverrideForTesting(null);
+            AddonKTGEWord.SetActiveTargetsOverrideForTesting(null);
+            KTGStateReader.ClearCache();
+        }
+    }
+
+    [Fact]
+    public void TestKTGAutomationManager_MidTyping_TargetMobDespawnsWhileOthersRemain_AbortsAndRetargets()
+    {
+        try
+        {
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(inDuty: true, inSquare: false);
+            AddonKTGInput.SetCanAcceptInputOverrideForTesting(true);
+            var config = new Configuration { Enabled = true, MinigameAutoplay = true, StopOnPenaltyCast = false };
+            var manager = new KTGAutomationManager(config, null);
+
+            // Two mobs on screen
+            AddonKTGEWord.SetActiveSlotsOverrideForTesting(new List<int> { 20001, 20002 });
+            AddonKTGEWord.SetActiveTargetsOverrideForTesting(new List<KTGTargetWord>
+            {
+                new(20001, "TargetA", 500f, 100f),
+                new(20002, "TargetB", 400f, 100f)
+            });
+
+            manager.Tick();
+            Assert.True(manager.IsTyping);
+            Assert.Equal("TargetA", manager.ActiveWord);
+
+            // Mob 20001 is killed by party (slot 20001 despawns, only 20002 remains)
+            AddonKTGEWord.SetActiveSlotsOverrideForTesting(new List<int> { 20002 });
+            AddonKTGEWord.SetActiveTargetsOverrideForTesting(new List<KTGTargetWord>
+            {
+                new(20002, "TargetB", 400f, 100f)
+            });
+
+            manager.Tick();
+
+            // Manager must have aborted TargetA and immediately started typing TargetB on this tick!
+            Assert.True(manager.IsTyping);
+            Assert.Equal("TargetB", manager.ActiveWord);
+            Assert.Contains("TargetB", manager.CurrentStatus);
+        }
+        finally
+        {
+            AddonKTGEWord.SetActiveSlotsOverrideForTesting(null);
+            AddonKTGEWord.SetActiveTargetsOverrideForTesting(null);
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(null, null);
+            AddonKTGInput.SetCanAcceptInputOverrideForTesting(null);
+            KTGStateReader.ClearCache();
+        }
+    }
 }
 
 
