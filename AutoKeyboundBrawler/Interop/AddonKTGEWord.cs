@@ -1,6 +1,7 @@
 using ECommons;
 using FFXIVClientStructs.FFXIV.Component.GUI;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace AutoKeyboundBrawler.Interop;
 
@@ -9,6 +10,19 @@ public record KTGTargetWord(int SlotId, string Word, float ScreenY = 0f, float S
 public static unsafe class AddonKTGEWord
 {
     public const string AddonName = "KTGEWord";
+
+    private static List<KTGTargetWord>? _activeTargetsOverride;
+    private static List<int>? _activeSlotsOverride;
+
+    internal static void SetActiveTargetsOverrideForTesting(List<KTGTargetWord>? targets)
+    {
+        _activeTargetsOverride = targets;
+    }
+
+    internal static void SetActiveSlotsOverrideForTesting(List<int>? slots)
+    {
+        _activeSlotsOverride = slots;
+    }
 
     public static bool TryGet(out AtkUnitBase* addon)
     {
@@ -32,6 +46,11 @@ public static unsafe class AddonKTGEWord
     /// </summary>
     public static List<KTGTargetWord> ReadActiveTargets()
     {
+        if (_activeTargetsOverride != null)
+        {
+            return _activeTargetsOverride;
+        }
+
         var targets = new List<KTGTargetWord>();
         if (!TryGet(out var addon) || !addon->IsReady)
         {
@@ -82,5 +101,45 @@ public static unsafe class AddonKTGEWord
         }
 
         return targets;
+    }
+
+    /// <summary>
+    /// Reads all active enemy component slot IDs currently present on screen in KTGEWord.
+    /// Unlike ReadActiveTargets, this detects whether the enemy plate itself is active on screen (Y > -500),
+    /// even if the prompt text node or plate is temporarily hidden, transparent, or obscured by mechanics (e.g. Cryptic Communications).
+    /// </summary>
+    public static List<int> ReadActiveSlotIds()
+    {
+        if (_activeSlotsOverride != null)
+        {
+            return _activeSlotsOverride;
+        }
+
+        if (_activeTargetsOverride != null)
+        {
+            return _activeTargetsOverride.Select(t => t.SlotId).Distinct().ToList();
+        }
+
+        var slots = new List<int>();
+        if (!TryGet(out var addon) || !addon->IsReady)
+        {
+            return slots;
+        }
+
+        for (var i = 0; i < addon->UldManager.NodeListCount; i++)
+        {
+            var node = addon->UldManager.NodeList[i];
+            if (node == null) continue;
+
+            if ((int)node->Type >= 1000)
+            {
+                var screenY = node->ScreenY != 0 ? node->ScreenY : node->Y;
+                if (screenY < -500f) continue;
+
+                slots.Add((int)node->NodeId);
+            }
+        }
+
+        return slots;
     }
 }

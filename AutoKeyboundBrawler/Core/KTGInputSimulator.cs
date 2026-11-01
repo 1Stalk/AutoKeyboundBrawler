@@ -77,6 +77,13 @@ public unsafe class KTGInputSimulator
         // write the full word directly and submit immediately without delay.
         if (!config.SimulateHumanTyping)
         {
+            if (!AddonKTGInput.CanAcceptInput())
+            {
+                CurrentWord = string.Empty;
+                _pendingActions.Clear();
+                return;
+            }
+
             if (AddonKTGInput.DirectSetText(textToType) && AddonKTGInput.DirectSubmit(textToType, out _))
             {
                 JustSubmitted = true;
@@ -119,6 +126,12 @@ public unsafe class KTGInputSimulator
             return;
         }
 
+        if (!AddonKTGInput.CanAcceptInput())
+        {
+            Clear(config);
+            return;
+        }
+
         if (_stepStopwatch.ElapsedMilliseconds < _nextDelayMs)
         {
             return;
@@ -135,12 +148,17 @@ public unsafe class KTGInputSimulator
 
         if (action.IsSubmit)
         {
+            if (!AddonKTGInput.CanAcceptInput())
+            {
+                Clear(config);
+                return;
+            }
+
             var submittedText = _backgroundTypedText.Length > 0 ? _backgroundTypedText.ToString() : CurrentWord;
             if (!AddonKTGInput.DirectSubmit(submittedText, out _))
             {
-                // Direct submission failed (e.g. addon transitioning); re-enqueue to retry next tick
-                _pendingActions.Enqueue(action);
-                _stepStopwatch.Restart();
+                // Direct submission failed (e.g. addon transitioning); discard stale submission to avoid sending stale words later
+                Clear(config);
                 return;
             }
 
@@ -157,6 +175,12 @@ public unsafe class KTGInputSimulator
 
         if (action.Character != '\0')
         {
+            if (!AddonKTGInput.CanAcceptInput())
+            {
+                Clear(config);
+                return;
+            }
+
             _backgroundTypedText.Append(action.Character);
             AddonKTGInput.DirectSetText(_backgroundTypedText.ToString());
         }

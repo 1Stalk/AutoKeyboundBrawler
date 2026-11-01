@@ -35,6 +35,33 @@ public static class KTGWordDatabase
         return ByRowId.TryGetValue(rowId, out var entry) ? entry : null;
     }
 
+    internal static void SetTestEntries(IEnumerable<WordEntry>? testEntries)
+    {
+        lock (Entries)
+        {
+            Entries.Clear();
+            ByRowId.Clear();
+            ByExactMatch.Clear();
+            ByStrippedMatch.Clear();
+
+            if (testEntries != null)
+            {
+                foreach (var entry in testEntries)
+                {
+                    Entries.Add(entry);
+                    ByRowId[entry.RowId] = entry;
+                    ByExactMatch[entry.Normalized] = entry;
+                    ByStrippedMatch[entry.Stripped] = entry;
+                }
+                IsLoaded = true;
+            }
+            else
+            {
+                IsLoaded = false;
+            }
+        }
+    }
+
     public static bool Load(IDataManager? data, IPluginLog? log = null)
     {
         if (data == null) return false;
@@ -253,25 +280,46 @@ public static class KTGWordDatabase
             return waveMatch;
         }
 
-        var stripped = StripPunctuation(normalized);
-        if (ByStrippedMatch.TryGetValue(stripped, out var strippedMatch))
-        {
-            return strippedMatch;
-        }
-
-        // Fuzzy match for partially obscured words (e.g. asterisks or missing characters)
-        if (normalized.Contains('*') || normalized.Contains('?'))
+        // Fuzzy match for partially obscured words (e.g. asterisks, question marks, or underscore placeholders)
+        if (normalized.Contains('*') || normalized.Contains('?') || normalized.Contains('？') || normalized.Contains('＊') || normalized.Contains('_'))
         {
             try
             {
-                var pattern = "^" + Regex.Escape(stripped).Replace("\\*", ".*").Replace("\\?", ".") + "$";
-                var regex = new Regex(pattern, RegexOptions.IgnoreCase, TimeSpan.FromMilliseconds(50));
-                return Entries.FirstOrDefault(e => regex.IsMatch(e.Stripped));
+                var fuzzyNorm = normalized.Replace('？', '?').Replace('＊', '*').Replace('_', '?');
+                var sb = new System.Text.StringBuilder(fuzzyNorm.Length);
+                for (var i = 0; i < fuzzyNorm.Length; i++)
+                {
+                    var c = fuzzyNorm[i];
+                    if (c == ' ' && i + 1 < fuzzyNorm.Length && fuzzyNorm[i + 1] is '!' or '！')
+                    {
+                        continue;
+                    }
+
+                    if (c is not ('!' or '\'' or '-' or '！' or '、' or '。' or '「' or '」' or '・' or '～' or '〜'))
+                    {
+                        sb.Append(c);
+                    }
+                }
+                var fuzzyStripped = sb.ToString().Trim();
+
+                if (fuzzyStripped.Any(ch => ch != '*' && ch != '?' && ch != ' '))
+                {
+                    var pattern = "^" + Regex.Escape(fuzzyStripped).Replace("\\*", ".*").Replace("\\?", ".") + "$";
+                    var regex = new Regex(pattern, RegexOptions.IgnoreCase, TimeSpan.FromMilliseconds(50));
+                    var match = Entries.FirstOrDefault(e => regex.IsMatch(e.Stripped) || regex.IsMatch(e.Normalized));
+                    if (match != null) return match;
+                }
             }
             catch (RegexMatchTimeoutException)
             {
                 // Fall through on regex timeout
             }
+        }
+
+        var stripped = StripPunctuation(normalized);
+        if (ByStrippedMatch.TryGetValue(stripped, out var strippedMatch))
+        {
+            return strippedMatch;
         }
 
         // Suffix/prefix match for quotes obscured at head or tail (minimum 8 characters)

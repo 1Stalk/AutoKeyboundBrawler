@@ -1,4 +1,5 @@
 using ECommons;
+using ECommons.DalamudServices;
 using FFXIVClientStructs.FFXIV.Component.GUI;
 using System;
 
@@ -43,16 +44,76 @@ public static unsafe class AddonKTGInput
         return null;
     }
 
+    /// <summary>
+    /// Checks whether the game's minigame text input is currently active and accepting player input.
+    /// During wave transitions or pre-start cutscenes, the game disables Node 7 (NodeFlags.Enabled is cleared)
+    /// and sets AtkValues index 2 (Bool) to false. Normal players cannot type during this state.
+    /// </summary>
+    public static bool CanAcceptInput()
+    {
+        if (_canAcceptInputOverride.HasValue) return _canAcceptInputOverride.Value;
+        if (_directSubmitOverride.HasValue || _directSetTextOverride.HasValue) return true;
+
+        try
+        {
+            if (!TryGet(out var addon) || addon == null)
+            {
+                // In unit test environment without game services or local player, default to true
+                if (Svc.ClientState == null || Svc.Objects?.LocalPlayer == null)
+                {
+                    return true;
+                }
+                return false;
+            }
+
+            if (!addon->IsReady || !addon->IsVisible)
+            {
+                return false;
+            }
+
+            // 1. Check AtkValues index 2 (Bool flag for input enabled: false during wave transition)
+            if (addon->AtkValuesCount > 2 && addon->AtkValues != null)
+            {
+                var val = &addon->AtkValues[2];
+                if (val->Type == AtkValueType.Bool && val->Byte == 0)
+                {
+                    return false;
+                }
+            }
+
+            // 2. Check Node 7 (TextInput component node) enabled flag: disabled during transition
+            for (var i = 0; i < addon->UldManager.NodeListCount; i++)
+            {
+                var node = addon->UldManager.NodeList[i];
+                if (node != null && node->NodeId == 7)
+                {
+                    if ((node->NodeFlags & NodeFlags.Enabled) == 0)
+                    {
+                        return false;
+                    }
+                    break;
+                }
+            }
+
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     public static bool IsInputActive()
     {
         try
         {
+            if (!CanAcceptInput()) return false;
             var input = GetTextInput();
             return input != null && input->IsActive;
         }
         catch
         {
-            return true;
+            return false;
         }
     }
 
@@ -98,11 +159,17 @@ public static unsafe class AddonKTGInput
 
     private static bool? _directSetTextOverride;
     private static bool? _directSubmitOverride;
+    private static bool? _canAcceptInputOverride;
 
     internal static void SetDirectOverridesForTesting(bool? setTextOverride, bool? submitOverride)
     {
         _directSetTextOverride = setTextOverride;
         _directSubmitOverride = submitOverride;
+    }
+
+    internal static void SetCanAcceptInputOverrideForTesting(bool? canAcceptOverride)
+    {
+        _canAcceptInputOverride = canAcceptOverride;
     }
 
     /// <summary>
@@ -112,6 +179,7 @@ public static unsafe class AddonKTGInput
     public static bool DirectSetText(string text)
     {
         if (_directSetTextOverride.HasValue) return _directSetTextOverride.Value;
+        if (!CanAcceptInput()) return false;
         try
         {
             var input = GetTextInput();
@@ -165,6 +233,7 @@ public static unsafe class AddonKTGInput
             cleared = true;
             return _directSubmitOverride.Value;
         }
+        if (!CanAcceptInput()) return false;
         try
         {
             var input = GetTextInput();

@@ -5,6 +5,7 @@ using Dalamud.Plugin.Services;
 using ECommons.DalamudServices;
 using System;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace AutoKeyboundBrawler.Core;
 
@@ -201,7 +202,7 @@ public class KTGAutomationManager
             return;
         }
 
-        // 1. Evaluate Safety (Stop on Red Keyboard penalty cast / Stun)
+        // 1. Evaluate Safety (Stop on Red Keyboard penalty cast / Stun / Wave Transition)
         if (!KTGSafetyGuard.CanType(_config, out var safetyReason))
         {
             CurrentStatus = $"SAFETY HALT: {safetyReason}";
@@ -213,6 +214,7 @@ public class KTGAutomationManager
             {
                 _log?.Warning($"[AutoKeyboundBrawler] Safety stop triggered ({safetyReason}). Halting typing simulator without sending keystrokes.");
                 _simulator.Clear();
+                KTGInputSimulator.TryClearInputBuffer(_config);
             }
             return;
         }
@@ -247,32 +249,79 @@ public class KTGAutomationManager
             return;
         }
 
-        // 5. Mid-Typing: Commit to current word - never cancel to switch targets.
-        // Defense & priority is fully resolved BEFORE typing starts (in step 7).
-        // Only KTGSafetyGuard halt (step 1) can abort mid-type.
+        // 5. Read active enemy slots and active targets currently visible on screen
+        var activeSlotIds = AddonKTGEWord.ReadActiveSlotIds();
+        var currentTargets = AddonKTGEWord.ReadActiveTargets();
+
+        // 5a. If NO enemies are on screen, abort any in-progress typing immediately to avoid failed attack emote
+        if (activeSlotIds.Count == 0 && currentTargets.Count == 0)
+        {
+            if (_simulator.IsTyping)
+            {
+                _log?.Information($"[AutoKeyboundBrawler] No enemies remaining on screen. Aborting in-progress typing (\"{_simulator.CurrentWord}\").");
+                _simulator.Clear();
+                KTGInputSimulator.TryClearInputBuffer(_config);
+            }
+            _lastTargetSlotId = -1;
+            _lastTargetWord = string.Empty;
+            CurrentStatus = "In Combat (Waiting for word...)";
+            return;
+        }
+
+        // 5b. Mid-Typing: Validate whether the target we are typing for is still active on screen
         if (_simulator.IsTyping)
         {
-            if (_config.AbortForDefense && !_simulator.IsDefenseWord)
+            var isTargetStillValid = _simulator.IsDefenseWord;
+
+            if (!isTargetStillValid)
             {
-                var currentTargets = AddonKTGEWord.ReadActiveTargets();
-                var currentCasts = AddonKTGEnemyCastBar.ReadActiveCasts();
-                if (KTGStateReader.HasActiveDefenseSentenceOnScreen(currentTargets, currentCasts, out var defenseTarget) &&
-                    defenseTarget != null && !string.IsNullOrWhiteSpace(defenseTarget.Word))
+                if (_lastTargetSlotId >= 0)
                 {
-                    _log?.Information($"[AutoKeyboundBrawler] Aborting typing for urgent defense prompt: \"{defenseTarget.Word}\"");
-                    _simulator.Clear();
-                    KTGInputSimulator.TryClearInputBuffer(_config);
-                    _lastTargetSlotId = defenseTarget.SlotId;
-                    _lastTargetWord = defenseTarget.Word;
-                    CurrentStatus = $"[DEFENSE SENTENCE] Enqueued: \"{defenseTarget.Word}\"";
-                    _simulator.EnqueueWord(defenseTarget.Word, _config, isDefense: true);
-                    return;
+                    // Target is valid if its enemy slot plate is still active on screen (even if words are obscured / hidden!)
+                    // or if it still appears in currentTargets
+                    isTargetStillValid = activeSlotIds.Contains(_lastTargetSlotId) ||
+                                         currentTargets.Any(t => t.SlotId == _lastTargetSlotId || KTGStateReader.IsSameWord(t.Word, _simulator.CurrentWord));
+                }
+                else
+                {
+                    // SlotId was not tracked (-1): valid if living enemies are on screen or same word matches
+                    isTargetStillValid = activeSlotIds.Count > 0 || currentTargets.Any(t => KTGStateReader.IsSameWord(t.Word, _simulator.CurrentWord));
                 }
             }
 
-            CurrentStatus = $"Typing: \"{_simulator.CurrentWord}\" ({_simulator.RemainingChars} left)";
-            _simulator.Update(_config);
-            return;
+            if (!isTargetStillValid)
+            {
+                _log?.Information($"[AutoKeyboundBrawler] Target for \"{_simulator.CurrentWord}\" (Slot {_lastTargetSlotId}) was defeated. Aborting typing.");
+                _simulator.Clear();
+                KTGInputSimulator.TryClearInputBuffer(_config);
+                _lastTargetSlotId = -1;
+                _lastTargetWord = string.Empty;
+                CurrentStatus = "Target defeated; selecting new target...";
+                // Fall through to select next living target on this tick
+            }
+            else
+            {
+                if (_config.AbortForDefense && !_simulator.IsDefenseWord)
+                {
+                    var currentCasts = AddonKTGEnemyCastBar.ReadActiveCasts();
+                    if (KTGStateReader.HasActiveDefenseSentenceOnScreen(currentTargets, currentCasts, out var defenseTarget) &&
+                        defenseTarget != null && !string.IsNullOrWhiteSpace(defenseTarget.Word))
+                    {
+                        _log?.Information($"[AutoKeyboundBrawler] Aborting typing for urgent defense prompt: \"{defenseTarget.Word}\"");
+                        _simulator.Clear();
+                        KTGInputSimulator.TryClearInputBuffer(_config);
+                        _lastTargetSlotId = defenseTarget.SlotId;
+                        _lastTargetWord = defenseTarget.Word;
+                        CurrentStatus = $"[DEFENSE SENTENCE] Enqueued: \"{defenseTarget.Word}\"";
+                        _simulator.EnqueueWord(defenseTarget.Word, _config, isDefense: true);
+                        return;
+                    }
+                }
+
+                CurrentStatus = $"Typing: \"{_simulator.CurrentWord}\" ({_simulator.RemainingChars} left)";
+                _simulator.Update(_config);
+                return;
+            }
         }
 
         // 6. Pre-Typing Cleanliness: If KTGInput has leftover text, clear it first safely
