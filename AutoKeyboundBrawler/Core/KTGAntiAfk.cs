@@ -105,23 +105,25 @@ public static unsafe class KTGAntiAfk
 
         // Hardware / OS keystroke layers (Layer 1 & Layer 2):
         // STRICT SAFETY RULES:
-        // 1. NEVER simulate keystrokes if the game window does NOT have foreground focus!
-        //    Sending keys when unfocused injects them into the user's active window (Discord, browser).
-        // 2. NEVER simulate Shift if the player is physically holding the Shift key!
-        //    Sending a synthetic Shift KeyUp releases their physical Shift in the OS.
-        // 3. Throttle keystrokes to at most once per 30 seconds (content kick limits are 120s+).
-        if (!NativeMethods.IsGameFocused())
+        // 1. If game window does NOT have foreground focus, only execute when ExperimentalBackgroundMode
+        //    is active (or RequireWindowFocus is disabled). In background mode, keystrokes are routed
+        //    strictly to FFXIV's internal KeyboardDevice and direct window HWND without OS-level leakage.
+        // 2. In foreground mode, suppress synthetic Shift if the user is physically holding Shift in FFXIV
+        //    to avoid releasing their physical hold. When unfocused (e.g. Background Mode), any physical Shift
+        //    belongs to an external app (Discord, browser) and must NOT block FFXIV keepalives.
+        // 3. Throttle keystrokes to at most once per 10 seconds (content kick limits are 120s+).
+        if (!NativeMethods.IsGameFocused() && config?.ExperimentalBackgroundMode != true && (config?.RequireWindowFocus ?? true))
         {
             return;
         }
 
-        if (NativeMethods.IsShiftPressed())
+        if (NativeMethods.IsGameFocused() && NativeMethods.IsShiftPressed())
         {
             return;
         }
 
         // ── Layer 1: Inject a harmless key via KeyboardDevice ─────────────
-        if ((now - _lastKeystrokeTime).TotalSeconds >= 30.0)
+        if ((now - _lastKeystrokeTime).TotalSeconds >= 10.0)
         {
             _lastKeystrokeTime = now;
             try
@@ -136,10 +138,24 @@ public static unsafe class KTGAntiAfk
             {
                 // Layer 2+ will cover us
             }
+
+            try
+            {
+                var hwnd = GetGameWindowHandle();
+                if (hwnd != IntPtr.Zero)
+                {
+                    KeyboardDevice.ProcessKeyboardInputMessage(hwnd, NativeMethods.WM_KEYDOWN, (IntPtr)NativeMethods.VK_SHIFT, IntPtr.Zero);
+                    KeyboardDevice.ProcessKeyboardInputMessage(hwnd, NativeMethods.WM_KEYUP, (IntPtr)NativeMethods.VK_SHIFT, unchecked((IntPtr)(int)0xC0100001));
+                }
+            }
+            catch
+            {
+                // Ignore if sig scanner uninitialized or native call throws
+            }
         }
 
         // ── Layer 2: SendMessage to the actual FFXIV game window ─────────
-        if ((now - _lastWndMsgTime).TotalSeconds >= 30.0)
+        if ((now - _lastWndMsgTime).TotalSeconds >= 10.0)
         {
             _lastWndMsgTime = now;
             try
@@ -159,6 +175,28 @@ public static unsafe class KTGAntiAfk
         }
     }
 
+    public static void ResetTimers()
+    {
+        _lastKeystrokeTime = DateTime.MinValue;
+        _lastWndMsgTime = DateTime.MinValue;
+    }
+
+    internal static DateTime LastKeystrokeTime => _lastKeystrokeTime;
+    internal static DateTime LastWndMsgTime => _lastWndMsgTime;
+
+    internal static void ResetTimersForTesting()
+    {
+        _lastKeystrokeTime = DateTime.MinValue;
+        _lastWndMsgTime = DateTime.MinValue;
+        _lastDiagLogTime = DateTime.MinValue;
+        _lastWarnLogTime = DateTime.MinValue;
+        _cachedGameHwnd = IntPtr.Zero;
+        _hwndOverrideForTesting = null;
+    }
+
+    private static IntPtr? _hwndOverrideForTesting;
+    internal static void SetGameHwndOverrideForTesting(IntPtr? hwnd) => _hwndOverrideForTesting = hwnd;
+
     private static void ResetInputTimerDataSpan(Span<InputTimerModule.InputTimerData> span)
     {
         for (var i = 0; i < span.Length; i++)
@@ -171,15 +209,23 @@ public static unsafe class KTGAntiAfk
     /// Finds the actual FFXIV game window by its window class name "FFXIVGAME".
     /// This is critical on Japanese systems where Process.MainWindowHandle can
     /// return an IME composition window instead of the real game window.
+    /// Falls back to Process.MainWindowHandle if FindWindow returns Zero.
     /// </summary>
     private static IntPtr GetGameWindowHandle()
     {
+        if (_hwndOverrideForTesting.HasValue)
+            return _hwndOverrideForTesting.Value;
+
         if (_cachedGameHwnd != IntPtr.Zero)
             return _cachedGameHwnd;
 
         try
         {
             _cachedGameHwnd = NativeMethods.FindWindow("FFXIVGAME", null);
+            if (_cachedGameHwnd == IntPtr.Zero)
+            {
+                _cachedGameHwnd = System.Diagnostics.Process.GetCurrentProcess().MainWindowHandle;
+            }
         }
         catch
         {

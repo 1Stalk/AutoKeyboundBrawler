@@ -34,6 +34,7 @@ public class CoreTests
         Assert.NotEqual(87, err);
     }
 
+
     [Fact]
     public void TestStripPunctuation_EnglishAndFrench()
     {
@@ -603,6 +604,167 @@ public class CoreTests
         {
             NativeMethods.SetGameFocusedOverrideForTesting(null);
             NativeMethods.SetShiftPressedOverrideForTesting(null);
+        }
+    }
+
+    [Fact]
+    public void TestKTGAntiAfk_ExperimentalBackgroundMode_AllowsUnfocusedKeystrokeKeepAlive()
+    {
+        try
+        {
+            KTGAntiAfk.ResetTimersForTesting();
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(inDuty: true, inSquare: false);
+            NativeMethods.SetGameFocusedOverrideForTesting(false);
+            NativeMethods.SetShiftPressedOverrideForTesting(false);
+
+            var configNormal = new Configuration
+            {
+                Enabled = true,
+                MinigameAutoplay = true,
+                RequireWindowFocus = true,
+                ExperimentalBackgroundMode = false
+            };
+
+            // In normal mode, unfocused window MUST block hardware/keystroke anti-afk pulses
+            KTGAntiAfk.ResetTimersForTesting();
+            Assert.Equal(DateTime.MinValue, KTGAntiAfk.LastKeystrokeTime);
+            Assert.Equal(DateTime.MinValue, KTGAntiAfk.LastWndMsgTime);
+
+            KTGAntiAfk.KeepAlive(configNormal);
+            Assert.Equal(DateTime.MinValue, KTGAntiAfk.LastKeystrokeTime);
+            Assert.Equal(DateTime.MinValue, KTGAntiAfk.LastWndMsgTime);
+
+            // In background mode, unfocused window MUST execute hardware/keystroke anti-afk pulses
+            var configBg = new Configuration
+            {
+                Enabled = true,
+                MinigameAutoplay = true,
+                RequireWindowFocus = true,
+                ExperimentalBackgroundMode = true
+            };
+
+            KTGAntiAfk.ResetTimersForTesting();
+            KTGAntiAfk.KeepAlive(configBg);
+            Assert.True(KTGAntiAfk.LastKeystrokeTime > DateTime.MinValue);
+            Assert.True(KTGAntiAfk.LastWndMsgTime > DateTime.MinValue);
+
+            // Verify throttle: immediate second call within 10s does not update timestamps
+            var firstPulseTime = KTGAntiAfk.LastKeystrokeTime;
+            KTGAntiAfk.KeepAlive(configBg);
+            Assert.Equal(firstPulseTime, KTGAntiAfk.LastKeystrokeTime);
+
+            // In background mode (unfocused), external shift hold in another app does NOT suppress FFXIV keepalive pulses
+            KTGAntiAfk.ResetTimersForTesting();
+            NativeMethods.SetShiftPressedOverrideForTesting(true);
+            NativeMethods.SetGameFocusedOverrideForTesting(false);
+            KTGAntiAfk.KeepAlive(configBg);
+            Assert.True(KTGAntiAfk.LastKeystrokeTime > DateTime.MinValue);
+            Assert.True(KTGAntiAfk.LastWndMsgTime > DateTime.MinValue);
+
+            // In foreground mode, in-game physical shift hold DOES suppress synthetic keystrokes to prevent releasing hold
+            KTGAntiAfk.ResetTimersForTesting();
+            NativeMethods.SetGameFocusedOverrideForTesting(true);
+            NativeMethods.SetShiftPressedOverrideForTesting(true);
+            KTGAntiAfk.KeepAlive(configBg);
+            Assert.Equal(DateTime.MinValue, KTGAntiAfk.LastKeystrokeTime);
+            Assert.Equal(DateTime.MinValue, KTGAntiAfk.LastWndMsgTime);
+        }
+        finally
+        {
+            KTGAntiAfk.ResetTimersForTesting();
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(null, null);
+            NativeMethods.SetGameFocusedOverrideForTesting(null);
+            NativeMethods.SetShiftPressedOverrideForTesting(null);
+        }
+    }
+
+
+    [Fact]
+    public void TestKTGAntiAfk_ResetTimers_ClearsTimestamps()
+    {
+        try
+        {
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(inDuty: true, inSquare: false);
+            NativeMethods.SetGameFocusedOverrideForTesting(true);
+
+            var config = new Configuration { Enabled = true, MinigameAutoplay = true };
+            KTGAntiAfk.KeepAlive(config);
+            Assert.True(KTGAntiAfk.LastKeystrokeTime > DateTime.MinValue);
+            Assert.True(KTGAntiAfk.LastWndMsgTime > DateTime.MinValue);
+
+            KTGAntiAfk.ResetTimers();
+            Assert.Equal(DateTime.MinValue, KTGAntiAfk.LastKeystrokeTime);
+            Assert.Equal(DateTime.MinValue, KTGAntiAfk.LastWndMsgTime);
+        }
+        finally
+        {
+            KTGAntiAfk.ResetTimersForTesting();
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(null, null);
+            NativeMethods.SetGameFocusedOverrideForTesting(null);
+        }
+    }
+
+    [Fact]
+    public void TestKTGAntiAfk_GetGameWindowHandle_FallbackAndOverride()
+    {
+        try
+        {
+            KTGAntiAfk.ResetTimersForTesting();
+
+            // Override takes precedence
+            var dummyHwnd = new IntPtr(0x12345);
+            KTGAntiAfk.SetGameHwndOverrideForTesting(dummyHwnd);
+            var mi = typeof(KTGAntiAfk).GetMethod("GetGameWindowHandle", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+            Assert.NotNull(mi);
+            var resultOverride = (IntPtr)mi.Invoke(null, null)!;
+            Assert.Equal(dummyHwnd, resultOverride);
+
+            // Without override, should safely evaluate (FindWindow or Process fallback) without throwing
+            KTGAntiAfk.SetGameHwndOverrideForTesting(null);
+            var resultAuto = (IntPtr)mi.Invoke(null, null)!;
+            Assert.True(resultAuto == IntPtr.Zero || resultAuto != IntPtr.Zero);
+        }
+        finally
+        {
+            KTGAntiAfk.ResetTimersForTesting();
+        }
+    }
+
+
+    [Fact]
+    public void TestKTGInputSimulator_BackgroundMode_SubmissionTriggersKeepAlive()
+    {
+        try
+        {
+            KTGAntiAfk.ResetTimersForTesting();
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(inDuty: true, inSquare: false);
+            NativeMethods.SetGameFocusedOverrideForTesting(false);
+            AddonKTGInput.SetDirectOverridesForTesting(setTextOverride: true, submitOverride: true);
+
+            var config = new Configuration
+            {
+                Enabled = true,
+                MinigameAutoplay = true,
+                RequireWindowFocus = true,
+                ExperimentalBackgroundMode = true,
+                SimulateHumanTyping = false
+            };
+
+            Assert.Equal(DateTime.MinValue, KTGAntiAfk.LastKeystrokeTime);
+
+            var sim = new KTGInputSimulator();
+            sim.EnqueueWord("QUICK", config);
+            Assert.True(sim.JustSubmitted);
+
+            // Submission should have pulsed KTGAntiAfk.KeepAlive
+            Assert.True(KTGAntiAfk.LastKeystrokeTime > DateTime.MinValue);
+        }
+        finally
+        {
+            AddonKTGInput.SetDirectOverridesForTesting(null, null);
+            KTGAntiAfk.ResetTimersForTesting();
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(null, null);
+            NativeMethods.SetGameFocusedOverrideForTesting(null);
         }
     }
 

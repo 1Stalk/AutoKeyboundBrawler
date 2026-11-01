@@ -63,6 +63,7 @@ public class KTGAutomationManager
     private SquareSubPhase _squareSubPhase = SquareSubPhase.Default;
     public SquareSubPhase CurrentSquareSubPhase => _squareSubPhase;
     public bool IsNavigationReady => _nav.IsVNavReady;
+    private EventPhase _previousPhase = EventPhase.None;
 
     public KTGAutomationManager(Configuration config, IDalamudPluginInterface? pi, IPluginLog? log)
     {
@@ -98,6 +99,11 @@ public class KTGAutomationManager
         }
 
         CurrentPhase = KTGStateReader.GetCurrentPhase();
+        if (_previousPhase != EventPhase.InMinigame && CurrentPhase == EventPhase.InMinigame)
+        {
+            KTGAntiAfk.ResetTimers();
+        }
+        _previousPhase = CurrentPhase;
 
         if (!KTGWordDatabase.IsLoaded || KTGWordDatabase.CurrentLanguage != Svc.ClientState.ClientLanguage)
         {

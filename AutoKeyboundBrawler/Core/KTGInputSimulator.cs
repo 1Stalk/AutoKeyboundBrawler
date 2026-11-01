@@ -93,6 +93,7 @@ public unsafe class KTGInputSimulator
                 _pendingActions.Clear();
                 _backgroundTypedText.Clear();
                 _stepStopwatch.Restart();
+                KTGAntiAfk.KeepAlive(config);
                 return;
             }
             // If direct instant submission failed (e.g. addon not ready), queue below so Update handles it
@@ -226,6 +227,7 @@ public unsafe class KTGInputSimulator
                 _pendingActions.Clear();
                 _backgroundTypedText.Clear();
                 _stepStopwatch.Restart();
+                KTGAntiAfk.KeepAlive(config);
                 return;
             }
 
