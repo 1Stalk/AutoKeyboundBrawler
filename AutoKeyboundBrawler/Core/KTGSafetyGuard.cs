@@ -157,11 +157,6 @@ public static class KTGSafetyGuard
             return false;
         }
 
-        if (!config.ExperimentalBackgroundMode && config.RequireWindowFocus && !NativeMethods.IsGameFocused())
-        {
-            reason = "Game window is not focused";
-            return false;
-        }
 
         if (config.StopOnPenaltyCast && AddonKTGEnemyCastBar.IsStopTypingActive(out var stopReason))
         {

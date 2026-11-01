@@ -124,9 +124,6 @@ public class KTGNavigationManager
                     var dz = dest.Z - localPlayer.Position.Z;
                     var desiredAngle = MathF.Atan2(dx, dz);
                     chara->GameObject.Rotation = desiredAngle;
-
-                    // Simulate forward movement
-                    KTGInputSimulator.SendKey(FFXIVClientStructs.FFXIV.Client.System.Input.SeVirtualKey.W, _config);
                 }
             }
         }

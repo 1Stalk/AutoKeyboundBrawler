@@ -11,27 +11,25 @@ namespace AutoKeyboundBrawler.Tests;
 public class CoreTests
 {
     [Fact]
-    public unsafe void TestNativeMethods_InputSize()
+    public void TestArchitecture_NoPInvokeOrNativeMethodsInPlugin()
     {
-        var inputSize = sizeof(NativeMethods.INPUT);
-        var input = new NativeMethods.INPUT
+        var asm = typeof(KTGInputSimulator).Assembly;
+        var nativeMethodsType = asm.GetType("AutoKeyboundBrawler.Interop.NativeMethods");
+        Assert.Null(nativeMethodsType);
+
+        // Verify that the plugin has zero Win32 DllImport / P/Invoke methods
+        foreach (var type in asm.GetTypes())
         {
-            type = NativeMethods.INPUT_KEYBOARD,
-            u = new NativeMethods.InputUnion
-            {
-                ki = new NativeMethods.KEYBDINPUT
-                {
-                    wVk = 0,
-                    wScan = 0,
-                    dwFlags = NativeMethods.KEYEVENTF_KEYUP
-                }
-            }
-        };
-        var ret = NativeMethods.SendInput(1, &input, inputSize);
-        var err = System.Runtime.InteropServices.Marshal.GetLastWin32Error();
-        Assert.Equal(40, inputSize);
-        // Error 87 is ERROR_INVALID_PARAMETER (which happens when cbSize != 40)
-        Assert.NotEqual(87, err);
+            var pInvokeMethods = type.GetMethods(
+                System.Reflection.BindingFlags.Public |
+                System.Reflection.BindingFlags.NonPublic |
+                System.Reflection.BindingFlags.Static |
+                System.Reflection.BindingFlags.Instance)
+                .Where(m => (m.Attributes & System.Reflection.MethodAttributes.PinvokeImpl) != 0)
+                .ToList();
+
+            Assert.Empty(pInvokeMethods);
+        }
     }
 
 
@@ -284,7 +282,6 @@ public class CoreTests
         Assert.True(config.AutoOpenNearRegistrar);
         Assert.True(config.PrioritizeDefense);
         Assert.True(config.StopOnPenaltyCast);
-        Assert.True(config.RequireWindowFocus);
 
         config.SetAutoLoop(true);
         Assert.True(config.AutoLoopEnabled);
@@ -305,7 +302,6 @@ public class CoreTests
         // Initialize reconciliation and safety overrides
         var configInit = new Configuration
         {
-            RequireWindowFocus = false,
             StopOnPenaltyCast = false,
             AutoTalkRegistrar = true,
             AutoConfirmRegister = true,
@@ -315,7 +311,6 @@ public class CoreTests
         configInit.Initialize(null!);
 
         // Safety guards must be forcibly re-enabled
-        Assert.True(configInit.RequireWindowFocus);
         Assert.True(configInit.StopOnPenaltyCast);
         Assert.True(configInit.PrioritizeAdds);
         Assert.True(configInit.PrioritizeDefense);
@@ -423,12 +418,6 @@ public class CoreTests
     {
         var flags = System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.Instance;
 
-        var nativeMethodsType = typeof(NativeMethods);
-        Assert.Null(nativeMethodsType.GetMethod("mouse_event", flags));
-        Assert.Null(nativeMethodsType.GetMethod("MakeLParam", flags));
-        Assert.Null(nativeMethodsType.GetField("WM_MOUSEMOVE", flags));
-        Assert.Null(nativeMethodsType.GetField("MOUSEEVENTF_MOVE", flags));
-
         var antiAfkType = typeof(KTGAntiAfk);
         Assert.Null(antiAfkType.GetMethod("mouse_event", flags));
         Assert.Null(antiAfkType.GetMethod("MakeLParam", flags));
@@ -463,12 +452,6 @@ public class CoreTests
         Assert.Null(antiAfkType.GetProperty("LastWndMsgTime", flags));
         Assert.Null(antiAfkType.GetField("_lastKeystrokeTime", flags));
         Assert.Null(antiAfkType.GetField("_lastWndMsgTime", flags));
-
-        var nativeMethodsType = typeof(NativeMethods);
-        Assert.Null(nativeMethodsType.GetMethod("FindWindow", flags));
-        Assert.Null(nativeMethodsType.GetMethod("SendMessage", flags));
-        Assert.Null(nativeMethodsType.GetField("WM_KEYDOWN", flags));
-        Assert.Null(nativeMethodsType.GetField("WM_KEYUP", flags));
     }
 
     [Fact]
@@ -700,77 +683,59 @@ public class CoreTests
     }
 
     [Fact]
-    public void TestNativeMethods_IsGameFocused_OverridesAndDefault()
-    {
-        try
-        {
-            NativeMethods.SetGameFocusedOverrideForTesting(true);
-            Assert.True(NativeMethods.IsGameFocused());
-
-            NativeMethods.SetGameFocusedOverrideForTesting(false);
-            Assert.False(NativeMethods.IsGameFocused());
-        }
-        finally
-        {
-            NativeMethods.SetGameFocusedOverrideForTesting(null);
-        }
-
-        // Without override, should evaluate without throwing
-        var noThrowException = Record.Exception(() => NativeMethods.IsGameFocused());
-        Assert.Null(noThrowException);
-    }
-
-    [Fact]
-    public void TestNativeMethods_IsShiftPressed_OverridesAndDefault()
-    {
-        try
-        {
-            NativeMethods.SetShiftPressedOverrideForTesting(true);
-            Assert.True(NativeMethods.IsShiftPressed());
-
-            NativeMethods.SetShiftPressedOverrideForTesting(false);
-            Assert.False(NativeMethods.IsShiftPressed());
-        }
-        finally
-        {
-            NativeMethods.SetShiftPressedOverrideForTesting(null);
-        }
-
-        var noThrowException = Record.Exception(() => NativeMethods.IsShiftPressed());
-        Assert.Null(noThrowException);
-    }
-
-    [Fact]
-    public void TestKTGSafetyGuard_CanType_WindowFocusSafety()
+    public void TestKTGSafetyGuard_CanType_InDutyAndSafetyChecks()
     {
         try
         {
             KTGSafetyGuard.SetTerritoryOverridesForTesting(inDuty: true, inSquare: false);
-            var config = new Configuration { Enabled = true, MinigameAutoplay = true, RequireWindowFocus = true, StopOnPenaltyCast = false };
+            var config = new Configuration { Enabled = true, MinigameAutoplay = true, StopOnPenaltyCast = false };
 
-            // 1. When game window is NOT focused, CanType MUST fail with "Game window is not focused"
-            NativeMethods.SetGameFocusedOverrideForTesting(false);
-            var canTypeUnfocused = KTGSafetyGuard.CanType(config, out var reasonUnfocused);
-            Assert.False(canTypeUnfocused);
-            Assert.Equal("Game window is not focused", reasonUnfocused);
+            // In background mode (the sole mode), CanType succeeds regardless of window focus
+            var canType = KTGSafetyGuard.CanType(config, out var reason);
+            Assert.True(canType);
+            Assert.Equal("OK", reason);
 
-            // 2. When game window IS focused, CanType succeeds
-            NativeMethods.SetGameFocusedOverrideForTesting(true);
-            var canTypeFocused = KTGSafetyGuard.CanType(config, out var reasonFocused);
-            Assert.True(canTypeFocused);
-            Assert.Equal("OK", reasonFocused);
+            // Outside duty -> fails
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(inDuty: false, inSquare: false);
+            Assert.False(KTGSafetyGuard.CanType(config, out var reasonDuty));
+            Assert.Equal("Not in Keybound Brawler duty", reasonDuty);
 
-            // 3. When RequireWindowFocus is disabled, unfocused does not block typing
-            config.RequireWindowFocus = false;
-            NativeMethods.SetGameFocusedOverrideForTesting(false);
-            var canTypeNoReq = KTGSafetyGuard.CanType(config, out var reasonNoReq);
-            Assert.True(canTypeNoReq);
-            Assert.Equal("OK", reasonNoReq);
+            // Plugin disabled -> fails
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(inDuty: true, inSquare: false);
+            config.Enabled = false;
+            Assert.False(KTGSafetyGuard.CanType(config, out var reasonDisabled));
+            Assert.Equal("Plugin disabled", reasonDisabled);
         }
         finally
         {
             KTGSafetyGuard.SetTerritoryOverridesForTesting(null, null);
-            NativeMethods.SetGameFocusedOverrideForTesting(null);
+        }
+    }
+
+    [Fact]
+    public void TestKTGSafetyGuard_CanType_PenaltyCastSafety()
+    {
+        try
+        {
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(inDuty: true, inSquare: false);
+            var config = new Configuration { Enabled = true, MinigameAutoplay = true, StopOnPenaltyCast = true };
+
+            // When penalty cast is active, typing must be blocked
+            AddonKTGEnemyCastBar.SetStopTypingOverrideForTesting(true, "Dynamic Sensory Jammer");
+            var canType = KTGSafetyGuard.CanType(config, out var reason);
+            Assert.False(canType);
+            Assert.Contains("Dynamic Sensory Jammer", reason);
+
+            // When penalty cast clears, typing is allowed
+            AddonKTGEnemyCastBar.SetStopTypingOverrideForTesting(false);
+            var canTypeCleared = KTGSafetyGuard.CanType(config, out var reasonCleared);
+            Assert.True(canTypeCleared);
+            Assert.Equal("OK", reasonCleared);
+        }
+        finally
+        {
+            AddonKTGEnemyCastBar.Reset();
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(null, null);
         }
     }
 
@@ -848,71 +813,39 @@ public class CoreTests
     [Fact]
     public void TestKTGAntiAfk_KeepAlive_SafetyChecks()
     {
-        try
-        {
-            // When game is unfocused, KeepAlive executes Layer 3 memory reset safely without sending keystrokes
-            NativeMethods.SetGameFocusedOverrideForTesting(false);
-            var exUnfocused = Record.Exception(() => KTGAntiAfk.KeepAlive(force: true));
-            Assert.Null(exUnfocused);
-
-            // When shift is physically held, KeepAlive executes without sending keystrokes
-            NativeMethods.SetGameFocusedOverrideForTesting(true);
-            NativeMethods.SetShiftPressedOverrideForTesting(true);
-            var exShiftHeld = Record.Exception(() => KTGAntiAfk.KeepAlive(force: true));
-            Assert.Null(exShiftHeld);
-        }
-        finally
-        {
-            NativeMethods.SetGameFocusedOverrideForTesting(null);
-            NativeMethods.SetShiftPressedOverrideForTesting(null);
-        }
+        // KeepAlive executes memory reset safely without throwing
+        var ex = Record.Exception(() => KTGAntiAfk.KeepAlive(force: true));
+        Assert.Null(ex);
     }
 
     [Fact]
-    public void TestKTGAntiAfk_KeepAlive_WorksInDutyRegardlessOfFocus()
+    public void TestKTGAntiAfk_KeepAlive_WorksInDuty()
     {
         try
         {
             KTGAntiAfk.ResetTimersForTesting();
             KTGSafetyGuard.SetTerritoryOverridesForTesting(inDuty: true, inSquare: false);
 
-            var configNormal = new Configuration
+            var config = new Configuration
             {
                 Enabled = true,
-                MinigameAutoplay = true,
-                RequireWindowFocus = true,
-                ExperimentalBackgroundMode = false
+                MinigameAutoplay = true
             };
 
-            // KeepAlive is pure in-memory, executes safely in duty without focus restrictions
-            NativeMethods.SetGameFocusedOverrideForTesting(false);
-            KTGAntiAfk.KeepAlive(configNormal);
-            Assert.True(KTGAntiAfk.LastKeepAliveTime > DateTime.MinValue);
-
-            var configBg = new Configuration
-            {
-                Enabled = true,
-                MinigameAutoplay = true,
-                RequireWindowFocus = true,
-                ExperimentalBackgroundMode = true
-            };
-
-            KTGAntiAfk.ResetTimersForTesting();
-            KTGAntiAfk.KeepAlive(configBg);
+            // KeepAlive is pure in-memory, executes safely in duty
+            KTGAntiAfk.KeepAlive(config);
             Assert.True(KTGAntiAfk.LastKeepAliveTime > DateTime.MinValue);
 
             // Outside duty, KeepAlive does nothing
             KTGAntiAfk.ResetTimersForTesting();
             KTGSafetyGuard.SetTerritoryOverridesForTesting(inDuty: false, inSquare: false);
-            KTGAntiAfk.KeepAlive(configBg);
+            KTGAntiAfk.KeepAlive(config);
             Assert.Equal(DateTime.MinValue, KTGAntiAfk.LastKeepAliveTime);
         }
         finally
         {
             KTGAntiAfk.ResetTimersForTesting();
             KTGSafetyGuard.SetTerritoryOverridesForTesting(null, null);
-            NativeMethods.SetGameFocusedOverrideForTesting(null);
-            NativeMethods.SetShiftPressedOverrideForTesting(null);
         }
     }
 
@@ -922,7 +855,6 @@ public class CoreTests
         try
         {
             KTGSafetyGuard.SetTerritoryOverridesForTesting(inDuty: true, inSquare: false);
-            NativeMethods.SetGameFocusedOverrideForTesting(true);
 
             var config = new Configuration { Enabled = true, MinigameAutoplay = true };
             KTGAntiAfk.KeepAlive(config);
@@ -937,10 +869,8 @@ public class CoreTests
         {
             KTGAntiAfk.ResetTimersForTesting();
             KTGSafetyGuard.SetTerritoryOverridesForTesting(null, null);
-            NativeMethods.SetGameFocusedOverrideForTesting(null);
         }
     }
-
 
     [Fact]
     public void TestKTGInputSimulator_BackgroundMode_SubmissionTriggersKeepAlive()
@@ -949,15 +879,12 @@ public class CoreTests
         {
             KTGAntiAfk.ResetTimersForTesting();
             KTGSafetyGuard.SetTerritoryOverridesForTesting(inDuty: true, inSquare: false);
-            NativeMethods.SetGameFocusedOverrideForTesting(false);
             AddonKTGInput.SetDirectOverridesForTesting(setTextOverride: true, submitOverride: true);
 
             var config = new Configuration
             {
                 Enabled = true,
                 MinigameAutoplay = true,
-                RequireWindowFocus = true,
-                ExperimentalBackgroundMode = true,
                 SimulateHumanTyping = false
             };
 
@@ -975,105 +902,79 @@ public class CoreTests
             AddonKTGInput.SetDirectOverridesForTesting(null, null);
             KTGAntiAfk.ResetTimersForTesting();
             KTGSafetyGuard.SetTerritoryOverridesForTesting(null, null);
-            NativeMethods.SetGameFocusedOverrideForTesting(null);
         }
     }
 
     [Fact]
-    public void TestKTGInputSimulator_UnfocusedBlocksKeyEmulation()
+    public void TestKTGInputSimulator_BackgroundTyping_Execution()
     {
         try
         {
-            NativeMethods.SetGameFocusedOverrideForTesting(false);
-
-            // 1. SendKey when unfocused returns immediately without throwing
-            var exSendKey = Record.Exception(() => KTGInputSimulator.SendKey(FFXIVClientStructs.FFXIV.Client.System.Input.SeVirtualKey.A));
-            Assert.Null(exSendKey);
-
-            // 2. SendKeyWithShift when unfocused returns immediately without throwing
-            var exSendKeyShift = Record.Exception(() => KTGInputSimulator.SendKeyWithShift(FFXIVClientStructs.FFXIV.Client.System.Input.SeVirtualKey.A));
-            Assert.Null(exSendKeyShift);
-
-            // 3. SendUnicodeChar when unfocused returns immediately without throwing
-            var exUnicode = Record.Exception(() => KTGInputSimulator.SendUnicodeChar('z'));
-            Assert.Null(exUnicode);
-
-            // 4. TryClearInputBuffer when unfocused returns false immediately
+            // 1. TryClearInputBuffer returns false if empty
             var cleared = KTGInputSimulator.TryClearInputBuffer();
             Assert.False(cleared);
 
-            // 5. Update when unfocused does NOT type pending characters
+            // 2. In background mode, Update types pending characters directly to in-memory addon
+            AddonKTGInput.SetDirectOverridesForTesting(true, true);
             var sim = new KTGInputSimulator();
-            var config = new Configuration { RequireWindowFocus = true };
+            var config = new Configuration { CharDelayMinMs = 10, CharDelayMaxMs = 10 };
             sim.EnqueueWord("Test", config);
             var initialRemaining = sim.RemainingChars;
             Assert.True(initialRemaining > 0);
 
-            // Call Update while unfocused
-            sim.Update(config);
-            Assert.Equal(initialRemaining, sim.RemainingChars);
-        }
-        finally
-        {
-            NativeMethods.SetGameFocusedOverrideForTesting(null);
-        }
-    }
-
-    [Fact]
-    public void TestKTGInputSimulator_SendKeyWithShift_PreservesPhysicalShift()
-    {
-        try
-        {
-            NativeMethods.SetGameFocusedOverrideForTesting(true);
-            NativeMethods.SetShiftPressedOverrideForTesting(true);
-
-            // When user is physically holding Shift, SendKeyWithShift should only emit keypress and NOT emit Shift Up
-            var ex = Record.Exception(() => KTGInputSimulator.SendKeyWithShift(FFXIVClientStructs.FFXIV.Client.System.Input.SeVirtualKey.KEY_1));
-            Assert.Null(ex);
-        }
-        finally
-        {
-            NativeMethods.SetGameFocusedOverrideForTesting(null);
-            NativeMethods.SetShiftPressedOverrideForTesting(null);
-        }
-    }
-
-    [Fact]
-    public void TestKTGInputSimulator_RequireWindowFocusFalse_AllowsTypingWhenUnfocused()
-    {
-        try
-        {
-            NativeMethods.SetGameFocusedOverrideForTesting(false);
-
-            var configFocused = new Configuration { RequireWindowFocus = true };
-            var configUnfocused = new Configuration { RequireWindowFocus = false };
-
-            // 1. ShouldBlockInput evaluation
-            Assert.True(KTGInputSimulator.ShouldBlockInput(configFocused));
-            Assert.False(KTGInputSimulator.ShouldBlockInput(configUnfocused));
-
-            // 2. Global Plugin.Configuration fallback when config is null
-            Plugin.Configuration = configUnfocused;
-            Assert.False(KTGInputSimulator.ShouldBlockInput(null));
-            Plugin.Configuration = configFocused;
-            Assert.True(KTGInputSimulator.ShouldBlockInput(null));
-
-            // 3. When RequireWindowFocus is false, Update allows processing even when unfocused
-            var sim = new KTGInputSimulator();
-            configUnfocused.CharDelayMinMs = 10;
-            configUnfocused.CharDelayMaxMs = 10;
-            sim.EnqueueWord("A", configUnfocused);
-            var initialRemaining = sim.RemainingChars;
-            Assert.True(initialRemaining > 0);
-
+            // Call Update after short delay
             System.Threading.Thread.Sleep(25);
-            sim.Update(configUnfocused);
+            sim.Update(config);
             Assert.True(sim.RemainingChars < initialRemaining);
         }
         finally
         {
-            NativeMethods.SetGameFocusedOverrideForTesting(null);
-            Plugin.Configuration = null!;
+            AddonKTGInput.SetDirectOverridesForTesting(null, null);
+        }
+    }
+
+    [Fact]
+    public void TestKTGInputSimulator_InstantMode_DirectSubmission()
+    {
+        try
+        {
+            AddonKTGInput.SetDirectOverridesForTesting(true, true);
+            var sim = new KTGInputSimulator();
+            var config = new Configuration { SimulateHumanTyping = false };
+
+            sim.EnqueueWord("RapidFire", config);
+            Assert.True(sim.JustSubmitted);
+            Assert.Equal("RapidFire", sim.LastSubmittedWord);
+            Assert.False(sim.IsTyping);
+            Assert.Equal(0, sim.RemainingChars);
+        }
+        finally
+        {
+            AddonKTGInput.SetDirectOverridesForTesting(null, null);
+        }
+    }
+
+    [Fact]
+    public void TestKTGInputSimulator_Clear_ResetsTypingAndDirectClearsBuffer()
+    {
+        try
+        {
+            AddonKTGInput.SetDirectOverridesForTesting(true, true);
+            var sim = new KTGInputSimulator();
+            var config = new Configuration { CharDelayMinMs = 100, CharDelayMaxMs = 100 };
+
+            sim.EnqueueWord("ClearMe", config);
+            Assert.True(sim.IsTyping);
+            Assert.Equal("ClearMe", sim.CurrentWord);
+
+            sim.Clear();
+            Assert.False(sim.IsTyping);
+            Assert.Equal(string.Empty, sim.CurrentWord);
+            Assert.Equal(0, sim.RemainingChars);
+        }
+        finally
+        {
+            AddonKTGInput.SetDirectOverridesForTesting(null, null);
         }
     }
 
@@ -1187,8 +1088,7 @@ public class CoreTests
             {
                 Enabled = true,
                 MinigameAutoplay = autoplay,
-                AutoLoopEnabled = autoLoop,
-                RequireWindowFocus = false
+                AutoLoopEnabled = autoLoop
             };
 
             var manager = new KTGAutomationManager(config, null);
@@ -1288,8 +1188,7 @@ public class CoreTests
             {
                 Enabled = true,
                 MinigameAutoplay = true,
-                AutoLoopEnabled = true,
-                RequireWindowFocus = false
+                AutoLoopEnabled = true
             };
 
             // 1. In Square: CanType must return false because player is outside duty
@@ -1700,13 +1599,12 @@ public class CoreTests
         try
         {
             KTGSafetyGuard.SetTerritoryOverridesForTesting(inDuty: true, inSquare: false);
-            NativeMethods.SetGameFocusedOverrideForTesting(true);
 
             var config = new Configuration
             {
                 Enabled = true,
                 MinigameAutoplay = true,
-                RequireWindowFocus = true
+                StopOnPenaltyCast = true
             };
 
             var manager = new KTGAutomationManager(config, null);
@@ -1720,68 +1618,55 @@ public class CoreTests
             Assert.True(manager.IsTyping);
             Assert.Equal("Airbuster", manager.ActiveWord);
 
-            // Window loses focus while in duty -> triggers safety halt
-            NativeMethods.SetGameFocusedOverrideForTesting(false);
+            // Penalty cast active in duty -> triggers safety halt
+            AddonKTGEnemyCastBar.SetStopTypingOverrideForTesting(true, "Dynamic Sensory Jammer");
             manager.Tick();
 
             // When safety guard fails CanType in duty, manager enters SAFETY HALT and aborts typing
             Assert.Equal(EventPhase.InMinigame, manager.CurrentPhase);
             Assert.StartsWith("SAFETY HALT:", manager.CurrentStatus);
-            Assert.Contains("Game window is not focused", manager.CurrentStatus);
+            Assert.Contains("Dynamic Sensory Jammer", manager.CurrentStatus);
             Assert.True(manager.IsHaltStatus);
             Assert.False(manager.IsTyping);
             Assert.Equal(string.Empty, manager.ActiveWord);
         }
         finally
         {
+            AddonKTGEnemyCastBar.Reset();
             KTGSafetyGuard.SetTerritoryOverridesForTesting(null, null);
-            NativeMethods.SetGameFocusedOverrideForTesting(null);
         }
     }
 
     [Fact]
-    public void TestKTGAutomationManager_HaltExitRecovery_StateMachine()
+    public void TestKTGAutomationManager_HaltExitRecovery_DirectClearInput()
     {
         try
         {
             KTGSafetyGuard.SetTerritoryOverridesForTesting(inDuty: true, inSquare: false);
-            NativeMethods.SetGameFocusedOverrideForTesting(false);
 
             var config = new Configuration
             {
                 Enabled = true,
                 MinigameAutoplay = true,
-                RequireWindowFocus = true
+                StopOnPenaltyCast = true
             };
 
             var manager = new KTGAutomationManager(config, null);
-            // 1. Enter halt while unfocused
+            // 1. Enter halt while penalty cast is active
+            AddonKTGEnemyCastBar.SetStopTypingOverrideForTesting(true, "Dynamic Sensory Jammer");
             manager.Tick();
             Assert.True(manager.IsHaltStatus);
 
-            // 2. Restore window focus -> exits halt into recovery step 1 (SendEnter)
-            NativeMethods.SetGameFocusedOverrideForTesting(true);
+            // 2. Penalty cast ends -> background mode exits halt immediately via DirectClearInput without multi-tick delays
+            AddonKTGEnemyCastBar.SetStopTypingOverrideForTesting(false);
             manager.Tick();
-            Assert.StartsWith("Halt Recovery: Activating text input", manager.CurrentStatus);
-
-            // 3. Sub-120ms tick -> stays in wait state
-            manager.Tick();
-            Assert.StartsWith("Halt Recovery:", manager.CurrentStatus);
-
-            // 4. Advance past 120ms window focus wait delay
-            var recoveryTimeField = typeof(KTGAutomationManager).GetField("_lastHaltRecoveryTime", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            Assert.NotNull(recoveryTimeField);
-            recoveryTimeField.SetValue(manager, DateTime.UtcNow.AddMilliseconds(-200));
-
-            manager.Tick();
-            // Input buffer is clean in mock/test environment -> recovery completes, resumes normal combat status
             Assert.False(manager.IsHaltStatus);
             Assert.Equal("In Combat (Waiting for word...)", manager.CurrentStatus);
         }
         finally
         {
+            AddonKTGEnemyCastBar.Reset();
             KTGSafetyGuard.SetTerritoryOverridesForTesting(null, null);
-            NativeMethods.SetGameFocusedOverrideForTesting(null);
         }
     }
 
@@ -1791,7 +1676,6 @@ public class CoreTests
         try
         {
             KTGSafetyGuard.SetTerritoryOverridesForTesting(inDuty: true, inSquare: false);
-            NativeMethods.SetGameFocusedOverrideForTesting(true);
 
             var config = new Configuration
             {
@@ -1823,7 +1707,6 @@ public class CoreTests
         finally
         {
             KTGSafetyGuard.SetTerritoryOverridesForTesting(null, null);
-            NativeMethods.SetGameFocusedOverrideForTesting(null);
         }
     }
 
@@ -2058,128 +1941,77 @@ public class CoreTests
     }
 
     [Fact]
-    public void TestConfiguration_ExperimentalBackgroundMode_DefaultFalse()
+    public void TestConfiguration_SimulateHumanTyping_DefaultTrue()
     {
         var config = new Configuration();
-        Assert.False(config.ExperimentalBackgroundMode);
+        Assert.True(config.SimulateHumanTyping);
     }
 
     [Fact]
-    public void TestKTGSafetyGuard_ExperimentalBackgroundMode_FocusBypassAndSafetyPreserved()
+    public void TestKTGSafetyGuard_BackgroundMode_FocusBypassAndSafetyPreserved()
     {
         try
         {
             KTGSafetyGuard.SetTerritoryOverridesForTesting(inDuty: true, inSquare: false);
-            NativeMethods.SetGameFocusedOverrideForTesting(false);
 
-            var configNormal = new Configuration
+            var config = new Configuration
             {
                 Enabled = true,
-                MinigameAutoplay = true,
-                RequireWindowFocus = true,
-                ExperimentalBackgroundMode = false
+                MinigameAutoplay = true
             };
 
-            // When background mode is disabled, unfocused window blocks typing
-            Assert.False(KTGSafetyGuard.CanType(configNormal, out var reasonNormal));
-            Assert.Equal("Game window is not focused", reasonNormal);
-
-            var configBg = new Configuration
-            {
-                Enabled = true,
-                MinigameAutoplay = true,
-                RequireWindowFocus = true,
-                ExperimentalBackgroundMode = true
-            };
-
-            // When background mode is enabled, unfocused window does NOT block typing
-            Assert.True(KTGSafetyGuard.CanType(configBg, out var reasonBg));
+            // In background mode (the sole mode), unfocused window does NOT block typing
+            Assert.True(KTGSafetyGuard.CanType(config, out var reasonBg));
             Assert.Equal("OK", reasonBg);
 
             // Safety check: disabled plugin still blocks typing
-            configBg.Enabled = false;
-            Assert.False(KTGSafetyGuard.CanType(configBg, out var reasonDisabled));
+            config.Enabled = false;
+            Assert.False(KTGSafetyGuard.CanType(config, out var reasonDisabled));
             Assert.Equal("Plugin disabled", reasonDisabled);
-            configBg.Enabled = true;
+            config.Enabled = true;
 
             // Safety check: minigame autoplay disabled still blocks typing
-            configBg.MinigameAutoplay = false;
-            Assert.False(KTGSafetyGuard.CanType(configBg, out var reasonNoAutoplay));
+            config.MinigameAutoplay = false;
+            Assert.False(KTGSafetyGuard.CanType(config, out var reasonNoAutoplay));
             Assert.Equal("Minigame autoplay disabled", reasonNoAutoplay);
-            configBg.MinigameAutoplay = true;
+            config.MinigameAutoplay = true;
 
             // Safety check: not in duty still blocks typing
             KTGSafetyGuard.SetTerritoryOverridesForTesting(inDuty: false, inSquare: false);
-            Assert.False(KTGSafetyGuard.CanType(configBg, out var reasonNotInDuty));
+            Assert.False(KTGSafetyGuard.CanType(config, out var reasonNotInDuty));
             Assert.Equal("Not in Keybound Brawler duty", reasonNotInDuty);
         }
         finally
         {
             KTGSafetyGuard.SetTerritoryOverridesForTesting(null, null);
-            NativeMethods.SetGameFocusedOverrideForTesting(null);
         }
     }
 
     [Fact]
-    public void TestKTGInputSimulator_ShouldBlockInput_BackgroundMode()
+    public void TestKTGInputSimulator_KeyAction_Struct()
     {
-        try
-        {
-            NativeMethods.SetGameFocusedOverrideForTesting(false);
+        var charAction = new KTGInputSimulator.KeyAction('A');
+        Assert.Equal('A', charAction.Character);
+        Assert.False(charAction.IsSubmit);
 
-            var configNormal = new Configuration
-            {
-                RequireWindowFocus = true,
-                ExperimentalBackgroundMode = false
-            };
-            Assert.True(KTGInputSimulator.ShouldBlockInput(configNormal));
-
-            var configBg = new Configuration
-            {
-                RequireWindowFocus = true,
-                ExperimentalBackgroundMode = true
-            };
-            Assert.False(KTGInputSimulator.ShouldBlockInput(configBg));
-
-            NativeMethods.SetGameFocusedOverrideForTesting(true);
-            Assert.False(KTGInputSimulator.ShouldBlockInput(configNormal));
-            Assert.False(KTGInputSimulator.ShouldBlockInput(configBg));
-        }
-        finally
-        {
-            NativeMethods.SetGameFocusedOverrideForTesting(null);
-        }
+        var submitAction = KTGInputSimulator.KeyAction.Submit;
+        Assert.True(submitAction.IsSubmit);
     }
 
     [Fact]
-    public void TestKTGInputSimulator_BackgroundMode_NeverDispatchesWin32Keys()
+    public void TestKTGInputSimulator_TryClearInputBuffer_SafeExecution()
     {
         try
         {
-            // Even if focused is true, background mode explicitly guards and suppresses Win32 keyboard APIs
-            NativeMethods.SetGameFocusedOverrideForTesting(true);
+            AddonKTGInput.SetDirectOverridesForTesting(true, true);
+            var config = new Configuration();
 
-            var configBg = new Configuration
-            {
-                ExperimentalBackgroundMode = true
-            };
-
-            var exKey = Record.Exception(() => KTGInputSimulator.SendKey(FFXIVClientStructs.FFXIV.Client.System.Input.SeVirtualKey.A, configBg));
-            Assert.Null(exKey);
-
-            var exShift = Record.Exception(() => KTGInputSimulator.SendKeyWithShift(FFXIVClientStructs.FFXIV.Client.System.Input.SeVirtualKey.A, configBg));
-            Assert.Null(exShift);
-
-            var exChar = Record.Exception(() => KTGInputSimulator.SendUnicodeChar('z', configBg));
-            Assert.Null(exChar);
-
-            // In background mode, TryClearInputBuffer checks addon and does not send physical escape
-            var exClear = Record.Exception(() => KTGInputSimulator.TryClearInputBuffer(configBg));
+            var exClear = Record.Exception(() => KTGInputSimulator.TryClearInputBuffer(config));
             Assert.Null(exClear);
         }
         finally
         {
-            NativeMethods.SetGameFocusedOverrideForTesting(null);
+            AddonKTGInput.SetDirectOverridesForTesting(null, null);
         }
     }
 
@@ -2194,7 +2026,6 @@ public class CoreTests
             // 1. Instant injection when SimulateHumanTyping is false
             var configInstant = new Configuration
             {
-                ExperimentalBackgroundMode = true,
                 SimulateHumanTyping = false
             };
             sim.EnqueueWord("SWORD", configInstant);
@@ -2212,7 +2043,6 @@ public class CoreTests
             // 3. Sequential simulation when SimulateHumanTyping is true
             var configSequential = new Configuration
             {
-                ExperimentalBackgroundMode = true,
                 SimulateHumanTyping = true,
                 CharDelayMinMs = 10,
                 CharDelayMaxMs = 10
@@ -2222,16 +2052,6 @@ public class CoreTests
             Assert.True(sim.IsDefenseWord);
             // 7 characters + Enter = 8 actions
             Assert.Equal(8, sim.RemainingChars);
-
-            // 4. Mid-word mode switch cleanly aborts and resets state
-            var configNormal = new Configuration
-            {
-                ExperimentalBackgroundMode = false,
-                SimulateHumanTyping = true
-            };
-            sim.Update(configNormal);
-            Assert.False(sim.IsTyping);
-            Assert.Equal(0, sim.RemainingChars);
 
             // Re-enqueue and test Clear
             sim.EnqueueWord("TEST", configSequential);
@@ -2248,14 +2068,14 @@ public class CoreTests
     }
 
     [Fact]
-    public void TestLocalization_BackgroundMode_AllFourLanguages()
+    public void TestLocalization_CoreKeys_AllFourLanguages()
     {
         var prevConfig = Plugin.Configuration;
         try
         {
             Plugin.Configuration = new Configuration();
 
-            var keys = new[] { "BackgroundMode", "BackgroundModeSub", "BackgroundModeTip" };
+            var keys = new[] { "TypingSolver", "AfkLoop", "AutoBuyCoffers" };
             var languages = new[]
             {
                 Dalamud.Game.ClientLanguage.English,
@@ -2309,24 +2129,23 @@ public class CoreTests
     public void TestKTGInputSimulator_BackgroundMode_AccentAndJapanesePreservation()
     {
         var sim = new KTGInputSimulator();
-        var configBg = new Configuration
+        var config = new Configuration
         {
-            ExperimentalBackgroundMode = true,
             SimulateHumanTyping = true,
             IgnorePunctuation = false
         };
 
         // Accented French word with circumflex: "fête"
         // In background mode, dead key logic is bypassed and 'ê' is enqueued directly
-        sim.EnqueueWord("fête", configBg);
+        sim.EnqueueWord("fête", config);
         Assert.Equal(5, sim.RemainingChars); // 'f', 'ê', 't', 'e', RETURN
 
         // German word with umlauts: "Größe"
-        sim.EnqueueWord("Größe", configBg);
+        sim.EnqueueWord("Größe", config);
         Assert.Equal(6, sim.RemainingChars); // 'G', 'r', 'ö', 'ß', 'e', RETURN
 
         // Japanese word with wave dash: "チョコボ～"
-        sim.EnqueueWord("チョコボ～", configBg);
+        sim.EnqueueWord("チョコボ～", config);
         Assert.Equal(6, sim.RemainingChars); // 4 kana + fullwidth tilde + RETURN
     }
 
@@ -2335,7 +2154,6 @@ public class CoreTests
     {
         var config = new Configuration
         {
-            ExperimentalBackgroundMode = true,
             SimulateHumanTyping = true
         };
         var mgr = new KTGAutomationManager(config, null);

@@ -227,14 +227,7 @@ public class MainWindow : Window, IDisposable
                 _config.Save();
             }
 
-            var bgMode = _config.ExperimentalBackgroundMode;
-            if (FF7ToggleSwitch.DrawRow("##bg_mode", Loc.Get("BackgroundMode"), Loc.Get("BackgroundModeSub"), ref bgMode,
-                FF7RTheme.AtbGold, Loc.Get("BackgroundModeTip")))
-            {
-                _config.ExperimentalBackgroundMode = bgMode;
-                _config.Save();
-                _automation.ClearTyping();
-            }
+
         }
     }
 

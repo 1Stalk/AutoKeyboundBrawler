@@ -33,8 +33,16 @@ public static unsafe class AddonKTGEnemyCastBar
 
     private static DateTime _lastInputsReEnabledTime = DateTime.MinValue;
 
+    private static (bool Active, string Reason)? _stopTypingOverrideForTesting;
+
+    internal static void SetStopTypingOverrideForTesting(bool? active, string? reason = null)
+    {
+        _stopTypingOverrideForTesting = active.HasValue ? (active.Value, reason ?? "Test Penalty Cast") : null;
+    }
+
     public static void Reset()
     {
+        _stopTypingOverrideForTesting = null;
         _postCastHoldUntil = DateTime.MinValue;
         _lastAvoidedSpellName = string.Empty;
         _wasCastingHaltSpell = false;
@@ -372,6 +380,12 @@ public static unsafe class AddonKTGEnemyCastBar
     /// </summary>
     public static bool IsStopTypingActive(out string activeReason)
     {
+        if (_stopTypingOverrideForTesting.HasValue)
+        {
+            activeReason = _stopTypingOverrideForTesting.Value.Reason;
+            return _stopTypingOverrideForTesting.Value.Active;
+        }
+
         var now = DateTime.UtcNow;
 
         // 1. If "Inputs re-enabled!" appears on screen, cancel any lingering wait
