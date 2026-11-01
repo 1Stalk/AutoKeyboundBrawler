@@ -35,6 +35,7 @@ public class CoreTests
     }
 
 
+
     [Fact]
     public void TestStripPunctuation_EnglishAndFrench()
     {
@@ -437,6 +438,260 @@ public class CoreTests
     }
 
     [Fact]
+    public void TestAntiAfk_ProvenInMemoryMechanismsDesign()
+    {
+        var flags = System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.Instance;
+        var antiAfkType = typeof(KTGAntiAfk);
+
+        // Verify proven in-memory methods and constants are present
+        Assert.NotNull(antiAfkType.GetMethod("ResetAgentInactivityTimer", flags));
+        Assert.NotNull(antiAfkType.GetMethod("IsMatchUnderway", flags));
+        Assert.Equal(0x28, KTGAntiAfk.AgentHudPointerOffset);
+        Assert.Equal(0x50, KTGAntiAfk.AgentInactivityTimerOffset);
+        Assert.Equal(0xDCE, KTGAntiAfk.DirectorContentTypeOffset);
+        Assert.Equal(0x1FC0, KTGAntiAfk.DirectorMatchUnderwayOffset);
+        Assert.Equal((byte)23, KTGAntiAfk.DirectorContentType);
+        Assert.Equal(397u, KTGAntiAfk.HudAgentId);
+        Assert.Equal(398u, KTGAntiAfk.InputAgentId);
+
+        // Verify obsolete and futile keystroke simulation methods and fields are absent
+        Assert.Null(antiAfkType.GetMethod("GetGameWindowHandle", flags));
+        Assert.Null(antiAfkType.GetField("_cachedGameHwnd", flags));
+        Assert.Null(antiAfkType.GetField("PulseIntervalSeconds", flags));
+        Assert.Null(antiAfkType.GetField("_lastPulseTime", flags));
+        Assert.Null(antiAfkType.GetProperty("LastKeystrokeTime", flags));
+        Assert.Null(antiAfkType.GetProperty("LastWndMsgTime", flags));
+        Assert.Null(antiAfkType.GetField("_lastKeystrokeTime", flags));
+        Assert.Null(antiAfkType.GetField("_lastWndMsgTime", flags));
+
+        var nativeMethodsType = typeof(NativeMethods);
+        Assert.Null(nativeMethodsType.GetMethod("FindWindow", flags));
+        Assert.Null(nativeMethodsType.GetMethod("SendMessage", flags));
+        Assert.Null(nativeMethodsType.GetField("WM_KEYDOWN", flags));
+        Assert.Null(nativeMethodsType.GetField("WM_KEYUP", flags));
+    }
+
+    [Fact]
+    public unsafe void TestAntiAfk_ResetAgentInactivityTimer_SafetyAndExecution()
+    {
+        try
+        {
+            KTGAntiAfk.ResetTimersForTesting();
+
+            // Allocate mock memory buffers for Agent 397 (HUD) and Agent 398 (Input)
+            // Agent 398 needs at least 0x60 bytes for offset 0x28 (hud ptr) and 0x50 (inactivity timer ulong)
+            byte[] hudBuffer = new byte[64];
+            byte[] inputBuffer = new byte[128];
+
+            fixed (byte* pHud = hudBuffer)
+            fixed (byte* pInput = inputBuffer)
+            {
+                var hudPtr = (IntPtr)pHud;
+                var inputPtr = (IntPtr)pInput;
+
+                // Point Agent 398 +0x28 to Agent 397 HUD
+                *(nint*)(pInput + KTGAntiAfk.AgentHudPointerOffset) = (nint)hudPtr;
+                // Set initial non-zero inactivity timer at +0x50
+                *(ulong*)(pInput + KTGAntiAfk.AgentInactivityTimerOffset) = 45000UL;
+
+                KTGAntiAfk.SetAgentBuffersForTesting(hudPtr, inputPtr);
+
+                // Case 1: Match is NOT underway -> must NOT reset and must return false
+                KTGAntiAfk.SetMatchUnderwayOverrideForTesting(false);
+                var resultNotUnderway = KTGAntiAfk.ResetAgentInactivityTimer();
+                Assert.False(resultNotUnderway);
+                Assert.Equal(45000UL, *(ulong*)(pInput + KTGAntiAfk.AgentInactivityTimerOffset));
+                Assert.Equal(DateTime.MinValue, KTGAntiAfk.LastAgentResetTime);
+
+                // Case 2: Match IS underway -> must zero Agent 398 +0x50 and return true
+                KTGAntiAfk.SetMatchUnderwayOverrideForTesting(true);
+                var resultUnderway = KTGAntiAfk.ResetAgentInactivityTimer();
+                Assert.True(resultUnderway);
+                Assert.Equal(0UL, *(ulong*)(pInput + KTGAntiAfk.AgentInactivityTimerOffset));
+                Assert.True(KTGAntiAfk.LastAgentResetTime > DateTime.MinValue);
+
+                // Case 3: Corrupted HUD pointer at +0x28 -> must fail safety validation and return false
+                *(ulong*)(pInput + KTGAntiAfk.AgentInactivityTimerOffset) = 99999UL;
+                *(nint*)(pInput + KTGAntiAfk.AgentHudPointerOffset) = unchecked((nint)0xDEADBEEF);
+                var resultCorrupted = KTGAntiAfk.ResetAgentInactivityTimer();
+                Assert.False(resultCorrupted);
+                Assert.Equal(99999UL, *(ulong*)(pInput + KTGAntiAfk.AgentInactivityTimerOffset));
+            }
+        }
+        finally
+        {
+            KTGAntiAfk.ResetTimersForTesting();
+        }
+    }
+
+    [Fact]
+    public unsafe void TestAntiAfk_EdgeCases_BoundaryValuesAndPartialBuffers()
+    {
+        try
+        {
+            KTGAntiAfk.ResetTimersForTesting();
+
+            // 1. Partial buffer assignment (hud buffer set, input buffer null)
+            byte[] hudBuffer = new byte[64];
+            fixed (byte* pHud = hudBuffer)
+            {
+                KTGAntiAfk.SetAgentBuffersForTesting((IntPtr)pHud, IntPtr.Zero);
+                KTGAntiAfk.SetMatchUnderwayOverrideForTesting(true);
+
+                // Should not crash and should return false safely
+                var resPartial = KTGAntiAfk.ResetAgentInactivityTimer();
+                Assert.False(resPartial);
+            }
+
+            // 2. Partial buffer assignment (input buffer set, hud buffer null)
+            byte[] inputBuffer = new byte[128];
+            fixed (byte* pInput = inputBuffer)
+            {
+                KTGAntiAfk.SetAgentBuffersForTesting(IntPtr.Zero, (IntPtr)pInput);
+                KTGAntiAfk.SetMatchUnderwayOverrideForTesting(true);
+
+                var resPartial2 = KTGAntiAfk.ResetAgentInactivityTimer();
+                Assert.False(resPartial2);
+            }
+
+            // 3. Boundary values: ulong.MaxValue
+            fixed (byte* pHud = hudBuffer)
+            fixed (byte* pInput = inputBuffer)
+            {
+                *(nint*)(pInput + KTGAntiAfk.AgentHudPointerOffset) = (nint)pHud;
+                *(ulong*)(pInput + KTGAntiAfk.AgentInactivityTimerOffset) = ulong.MaxValue;
+
+                KTGAntiAfk.SetAgentBuffersForTesting((IntPtr)pHud, (IntPtr)pInput);
+                KTGAntiAfk.SetMatchUnderwayOverrideForTesting(true);
+
+                var resMax = KTGAntiAfk.ResetAgentInactivityTimer();
+                Assert.True(resMax);
+                Assert.Equal(0UL, *(ulong*)(pInput + KTGAntiAfk.AgentInactivityTimerOffset));
+
+                // 4. Boundary value: Already 0UL
+                var resZero = KTGAntiAfk.ResetAgentInactivityTimer();
+                Assert.True(resZero);
+                Assert.Equal(0UL, *(ulong*)(pInput + KTGAntiAfk.AgentInactivityTimerOffset));
+            }
+        }
+        finally
+        {
+            KTGAntiAfk.ResetTimersForTesting();
+        }
+    }
+
+    [Fact]
+    public void TestAntiAfk_IsMatchUnderway_OverridesAndDefault()
+    {
+        try
+        {
+            KTGAntiAfk.ResetTimersForTesting();
+
+            // Override true
+            KTGAntiAfk.SetMatchUnderwayOverrideForTesting(true);
+            Assert.True(KTGAntiAfk.IsMatchUnderway());
+
+            // Override false
+            KTGAntiAfk.SetMatchUnderwayOverrideForTesting(false);
+            Assert.False(KTGAntiAfk.IsMatchUnderway());
+
+            // Default (no override, in test environment with no game running)
+            KTGAntiAfk.SetMatchUnderwayOverrideForTesting(null);
+            var ex = Record.Exception(() => KTGAntiAfk.IsMatchUnderway());
+            Assert.Null(ex);
+            Assert.False(KTGAntiAfk.IsMatchUnderway());
+        }
+        finally
+        {
+            KTGAntiAfk.ResetTimersForTesting();
+        }
+    }
+
+    [Fact]
+    public unsafe void TestAntiAfk_IsMatchUnderway_DirectorOffsetsMemoryValidation()
+    {
+        try
+        {
+            KTGAntiAfk.ResetTimersForTesting();
+
+            // Director buffer needs to accommodate DirectorMatchUnderwayOffset (0x1FC0 + 1)
+            byte[] directorBuffer = new byte[0x2000];
+            fixed (byte* pDir = directorBuffer)
+            {
+                var dirPtr = (IntPtr)pDir;
+                KTGAntiAfk.SetDirectorBufferForTesting(dirPtr);
+
+                // Case 1: Matching content type (23) and match underway flag (1) -> true
+                directorBuffer[KTGAntiAfk.DirectorContentTypeOffset] = KTGAntiAfk.DirectorContentType;
+                directorBuffer[KTGAntiAfk.DirectorMatchUnderwayOffset] = 1;
+                Assert.True(KTGAntiAfk.IsMatchUnderway());
+
+                // Case 2: Matching content type (23) and match underway flag non-zero byte (0x80) -> true
+                directorBuffer[KTGAntiAfk.DirectorMatchUnderwayOffset] = 0x80;
+                Assert.True(KTGAntiAfk.IsMatchUnderway());
+
+                // Case 3: Match underway flag is 0 -> false
+                directorBuffer[KTGAntiAfk.DirectorMatchUnderwayOffset] = 0;
+                Assert.False(KTGAntiAfk.IsMatchUnderway());
+
+                // Case 4: Wrong content type (22) even if match underway flag is 1 -> false
+                directorBuffer[KTGAntiAfk.DirectorContentTypeOffset] = 22;
+                directorBuffer[KTGAntiAfk.DirectorMatchUnderwayOffset] = 1;
+                Assert.False(KTGAntiAfk.IsMatchUnderway());
+
+                // Case 5: Content type is 0 -> false
+                directorBuffer[KTGAntiAfk.DirectorContentTypeOffset] = 0;
+                Assert.False(KTGAntiAfk.IsMatchUnderway());
+            }
+        }
+        finally
+        {
+            KTGAntiAfk.ResetTimersForTesting();
+        }
+    }
+
+    [Fact]
+    public unsafe void TestAntiAfk_InputTimerModule_MemoryZeroing()
+    {
+        try
+        {
+            KTGAntiAfk.ResetTimersForTesting();
+
+            // Allocate a buffer large enough for InputTimerModule
+            byte[] timerBuffer = new byte[1024];
+            fixed (byte* pTimer = timerBuffer)
+            {
+                var pModule = (FFXIVClientStructs.FFXIV.Client.UI.Misc.InputTimerModule*)pTimer;
+                pModule->ContentInputTimer = 120.5f;
+                pModule->AfkTimer = 580.0f;
+                pModule->InputTimer = 45.0f;
+
+                KTGAntiAfk.SetInputTimerModuleForTesting((IntPtr)pTimer);
+
+                // Force keepalive execution to trigger timer module reset
+                KTGAntiAfk.KeepAlive(force: true);
+
+                Assert.Equal(0f, pModule->ContentInputTimer);
+                Assert.Equal(0f, pModule->AfkTimer);
+                Assert.Equal(0f, pModule->InputTimer);
+                Assert.True(KTGAntiAfk.LastInputTimerResetTime > DateTime.MinValue);
+                Assert.True(KTGAntiAfk.LastKeepAliveTime > DateTime.MinValue);
+            }
+        }
+        finally
+        {
+            KTGAntiAfk.ResetTimersForTesting();
+        }
+    }
+
+    [Fact]
+    public void TestAntiAfk_ShouldKeepAlive_NullSafety()
+    {
+        var result = KTGAntiAfk.ShouldKeepAlive(null);
+        Assert.False(result);
+    }
+
+    [Fact]
     public void TestAntiAfk_KeepAliveExecutesWithoutThrowing()
     {
         // Must handle missing game process, null pointers, and missing Dalamud services gracefully
@@ -550,7 +805,13 @@ public class CoreTests
             // With both false: no keepalive in duty
             config.MinigameAutoplay = false;
             config.AutoLoopEnabled = false;
+            config.AutoBuyCoffers = false;
             Assert.False(KTGAntiAfk.ShouldKeepAlive(config));
+
+            // With AutoBuyCoffers=true in duty: keepalive
+            config.AutoBuyCoffers = true;
+            Assert.True(KTGAntiAfk.ShouldKeepAlive(config));
+            config.AutoBuyCoffers = false;
 
             // With both true: keepalive in duty
             config.MinigameAutoplay = true;
@@ -608,14 +869,12 @@ public class CoreTests
     }
 
     [Fact]
-    public void TestKTGAntiAfk_ExperimentalBackgroundMode_AllowsUnfocusedKeystrokeKeepAlive()
+    public void TestKTGAntiAfk_KeepAlive_WorksInDutyRegardlessOfFocus()
     {
         try
         {
             KTGAntiAfk.ResetTimersForTesting();
             KTGSafetyGuard.SetTerritoryOverridesForTesting(inDuty: true, inSquare: false);
-            NativeMethods.SetGameFocusedOverrideForTesting(false);
-            NativeMethods.SetShiftPressedOverrideForTesting(false);
 
             var configNormal = new Configuration
             {
@@ -625,16 +884,11 @@ public class CoreTests
                 ExperimentalBackgroundMode = false
             };
 
-            // In normal mode, unfocused window MUST block hardware/keystroke anti-afk pulses
-            KTGAntiAfk.ResetTimersForTesting();
-            Assert.Equal(DateTime.MinValue, KTGAntiAfk.LastKeystrokeTime);
-            Assert.Equal(DateTime.MinValue, KTGAntiAfk.LastWndMsgTime);
-
+            // KeepAlive is pure in-memory, executes safely in duty without focus restrictions
+            NativeMethods.SetGameFocusedOverrideForTesting(false);
             KTGAntiAfk.KeepAlive(configNormal);
-            Assert.Equal(DateTime.MinValue, KTGAntiAfk.LastKeystrokeTime);
-            Assert.Equal(DateTime.MinValue, KTGAntiAfk.LastWndMsgTime);
+            Assert.True(KTGAntiAfk.LastKeepAliveTime > DateTime.MinValue);
 
-            // In background mode, unfocused window MUST execute hardware/keystroke anti-afk pulses
             var configBg = new Configuration
             {
                 Enabled = true,
@@ -645,29 +899,13 @@ public class CoreTests
 
             KTGAntiAfk.ResetTimersForTesting();
             KTGAntiAfk.KeepAlive(configBg);
-            Assert.True(KTGAntiAfk.LastKeystrokeTime > DateTime.MinValue);
-            Assert.True(KTGAntiAfk.LastWndMsgTime > DateTime.MinValue);
+            Assert.True(KTGAntiAfk.LastKeepAliveTime > DateTime.MinValue);
 
-            // Verify throttle: immediate second call within 10s does not update timestamps
-            var firstPulseTime = KTGAntiAfk.LastKeystrokeTime;
-            KTGAntiAfk.KeepAlive(configBg);
-            Assert.Equal(firstPulseTime, KTGAntiAfk.LastKeystrokeTime);
-
-            // In background mode (unfocused), external shift hold in another app does NOT suppress FFXIV keepalive pulses
+            // Outside duty, KeepAlive does nothing
             KTGAntiAfk.ResetTimersForTesting();
-            NativeMethods.SetShiftPressedOverrideForTesting(true);
-            NativeMethods.SetGameFocusedOverrideForTesting(false);
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(inDuty: false, inSquare: false);
             KTGAntiAfk.KeepAlive(configBg);
-            Assert.True(KTGAntiAfk.LastKeystrokeTime > DateTime.MinValue);
-            Assert.True(KTGAntiAfk.LastWndMsgTime > DateTime.MinValue);
-
-            // In foreground mode, in-game physical shift hold DOES suppress synthetic keystrokes to prevent releasing hold
-            KTGAntiAfk.ResetTimersForTesting();
-            NativeMethods.SetGameFocusedOverrideForTesting(true);
-            NativeMethods.SetShiftPressedOverrideForTesting(true);
-            KTGAntiAfk.KeepAlive(configBg);
-            Assert.Equal(DateTime.MinValue, KTGAntiAfk.LastKeystrokeTime);
-            Assert.Equal(DateTime.MinValue, KTGAntiAfk.LastWndMsgTime);
+            Assert.Equal(DateTime.MinValue, KTGAntiAfk.LastKeepAliveTime);
         }
         finally
         {
@@ -677,7 +915,6 @@ public class CoreTests
             NativeMethods.SetShiftPressedOverrideForTesting(null);
         }
     }
-
 
     [Fact]
     public void TestKTGAntiAfk_ResetTimers_ClearsTimestamps()
@@ -689,44 +926,18 @@ public class CoreTests
 
             var config = new Configuration { Enabled = true, MinigameAutoplay = true };
             KTGAntiAfk.KeepAlive(config);
-            Assert.True(KTGAntiAfk.LastKeystrokeTime > DateTime.MinValue);
-            Assert.True(KTGAntiAfk.LastWndMsgTime > DateTime.MinValue);
+            Assert.True(KTGAntiAfk.LastKeepAliveTime > DateTime.MinValue);
 
             KTGAntiAfk.ResetTimers();
-            Assert.Equal(DateTime.MinValue, KTGAntiAfk.LastKeystrokeTime);
-            Assert.Equal(DateTime.MinValue, KTGAntiAfk.LastWndMsgTime);
+            Assert.Equal(DateTime.MinValue, KTGAntiAfk.LastKeepAliveTime);
+            Assert.Equal(DateTime.MinValue, KTGAntiAfk.LastAgentResetTime);
+            Assert.Equal(DateTime.MinValue, KTGAntiAfk.LastInputTimerResetTime);
         }
         finally
         {
             KTGAntiAfk.ResetTimersForTesting();
             KTGSafetyGuard.SetTerritoryOverridesForTesting(null, null);
             NativeMethods.SetGameFocusedOverrideForTesting(null);
-        }
-    }
-
-    [Fact]
-    public void TestKTGAntiAfk_GetGameWindowHandle_FallbackAndOverride()
-    {
-        try
-        {
-            KTGAntiAfk.ResetTimersForTesting();
-
-            // Override takes precedence
-            var dummyHwnd = new IntPtr(0x12345);
-            KTGAntiAfk.SetGameHwndOverrideForTesting(dummyHwnd);
-            var mi = typeof(KTGAntiAfk).GetMethod("GetGameWindowHandle", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
-            Assert.NotNull(mi);
-            var resultOverride = (IntPtr)mi.Invoke(null, null)!;
-            Assert.Equal(dummyHwnd, resultOverride);
-
-            // Without override, should safely evaluate (FindWindow or Process fallback) without throwing
-            KTGAntiAfk.SetGameHwndOverrideForTesting(null);
-            var resultAuto = (IntPtr)mi.Invoke(null, null)!;
-            Assert.True(resultAuto == IntPtr.Zero || resultAuto != IntPtr.Zero);
-        }
-        finally
-        {
-            KTGAntiAfk.ResetTimersForTesting();
         }
     }
 
@@ -750,14 +961,14 @@ public class CoreTests
                 SimulateHumanTyping = false
             };
 
-            Assert.Equal(DateTime.MinValue, KTGAntiAfk.LastKeystrokeTime);
+            Assert.Equal(DateTime.MinValue, KTGAntiAfk.LastKeepAliveTime);
 
             var sim = new KTGInputSimulator();
             sim.EnqueueWord("QUICK", config);
             Assert.True(sim.JustSubmitted);
 
             // Submission should have pulsed KTGAntiAfk.KeepAlive
-            Assert.True(KTGAntiAfk.LastKeystrokeTime > DateTime.MinValue);
+            Assert.True(KTGAntiAfk.LastKeepAliveTime > DateTime.MinValue);
         }
         finally
         {

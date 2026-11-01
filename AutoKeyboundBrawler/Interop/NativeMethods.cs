@@ -5,9 +5,7 @@ namespace AutoKeyboundBrawler.Interop;
 
 internal static unsafe class NativeMethods
 {
-    // Window message constants
-    public const uint WM_KEYDOWN = 0x0100;
-    public const uint WM_KEYUP = 0x0101;
+    // Window message constants (WM_CHAR used for Unicode typing)
     public const uint WM_CHAR = 0x0102;
 
     // Virtual key codes
@@ -79,12 +77,6 @@ internal static unsafe class NativeMethods
 
     [DllImport("user32.dll", SetLastError = true)]
     public static extern uint SendInput(uint nInputs, INPUT* pInputs, int cbSize);
-
-    [DllImport("user32.dll", CharSet = CharSet.Auto)]
-    public static extern IntPtr FindWindow(string lpClassName, string? lpWindowName);
-
-    [DllImport("user32.dll", CharSet = CharSet.Auto)]
-    public static extern IntPtr SendMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
 
     [DllImport("user32.dll")]
     public static extern IntPtr GetForegroundWindow();
