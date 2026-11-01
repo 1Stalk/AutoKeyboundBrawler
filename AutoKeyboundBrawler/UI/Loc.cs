@@ -127,6 +127,21 @@ public static class Loc
             ("IgnorePunctTip", ClientLanguage.French) => "Supprime automatiquement la ponctuation pour une saisie plus rapide et sans erreur.",
             ("IgnorePunctTip", _) => "Automatically strips punctuation symbols to guarantee faster, error-free typing.",
 
+            ("BackgroundMode", ClientLanguage.Japanese) => "バックグラウンド入力 (実験的機能)",
+            ("BackgroundMode", ClientLanguage.German) => "Hintergrundmodus (Experimentell)",
+            ("BackgroundMode", ClientLanguage.French) => "Mode arrière-plan (Expérimental)",
+            ("BackgroundMode", _) => "Background Mode (Experimental)",
+
+            ("BackgroundModeSub", ClientLanguage.Japanese) => "非アクティブウィンドウ時も自動入力",
+            ("BackgroundModeSub", ClientLanguage.German) => "Tippen ohne aktiven Fensterfokus",
+            ("BackgroundModeSub", ClientLanguage.French) => "Frappe sans focus sur la fenêtre",
+            ("BackgroundModeSub", _) => "Type without active window focus",
+
+            ("BackgroundModeTip", ClientLanguage.Japanese) => "OSレベルのキーボード操作を行わず、ゲーム内UIバッファにテキストを直接注入します。Discordやブラウザへの誤入力を防止します。",
+            ("BackgroundModeTip", ClientLanguage.German) => "Injiziert Text direkt in den Benutzeroberflächen-Puffer des Minispiels ohne Tastatursimulation. Verhindert unbeabsichtigtes Tippen in Discord oder Browser.",
+            ("BackgroundModeTip", ClientLanguage.French) => "Injecte directement le texte dans le tampon de l'interface sans simulation de clavier physique. Évite les saisies involontaires dans Discord ou le navigateur.",
+            ("BackgroundModeTip", _) => "Directly injects text into the minigame UI buffer without physical keyboard simulation. Prevents typing into external applications when switched to Discord or browser.",
+
             // --- Sliders & Sections ---
             ("Speed", ClientLanguage.Japanese) => "速度設定",
             ("Speed", ClientLanguage.German) => "GESCHWINDIGKEIT",

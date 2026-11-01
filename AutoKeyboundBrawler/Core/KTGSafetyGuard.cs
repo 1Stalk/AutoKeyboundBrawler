@@ -157,7 +157,7 @@ public static class KTGSafetyGuard
             return false;
         }
 
-        if (config.RequireWindowFocus && !NativeMethods.IsGameFocused())
+        if (!config.ExperimentalBackgroundMode && config.RequireWindowFocus && !NativeMethods.IsGameFocused())
         {
             reason = "Game window is not focused";
             return false;

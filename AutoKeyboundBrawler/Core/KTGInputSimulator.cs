@@ -18,10 +18,10 @@ public unsafe class KTGInputSimulator
         public readonly bool IsUnicode;
         public readonly bool RequiresShift;
 
-        public KeyAction(SeVirtualKey vk, bool shift = false)
+        public KeyAction(SeVirtualKey vk, bool shift = false, char c = '\0')
         {
             VirtualKey = vk;
-            Character = '\0';
+            Character = c;
             IsUnicode = false;
             RequiresShift = shift;
         }
@@ -38,23 +38,29 @@ public unsafe class KTGInputSimulator
     private readonly Random _random = new();
     private readonly Queue<KeyAction> _pendingActions = new();
     private readonly Stopwatch _stepStopwatch = new();
+    private readonly System.Text.StringBuilder _backgroundTypedText = new();
 
     private long _nextDelayMs;
     private bool _isSubmittingWord;
+    private bool? _wasBackgroundMode;
 
     public bool IsTyping => _pendingActions.Count > 0 || _isSubmittingWord;
     public string CurrentWord { get; private set; } = string.Empty;
     public int RemainingChars => _pendingActions.Count;
+    public bool IsDefenseWord { get; set; }
 
     public bool JustSubmitted { get; set; }
     public string LastSubmittedWord { get; private set; } = string.Empty;
 
-    public void EnqueueWord(string word, Configuration config)
+    public void EnqueueWord(string word, Configuration config, bool isDefense = false)
     {
         _pendingActions.Clear();
+        _backgroundTypedText.Clear();
         CurrentWord = word;
         _isSubmittingWord = false;
         JustSubmitted = false;
+        IsDefenseWord = isDefense;
+        _wasBackgroundMode = config.ExperimentalBackgroundMode;
 
         var isJapanese = (Svc.ClientState != null && Svc.ClientState.ClientLanguage == ClientLanguage.Japanese) ||
                          word.Any(c => (c >= 0x3000 && c <= 0x9FFF) || (c >= 0xFF00 && c <= 0xFFEF));
@@ -74,6 +80,36 @@ public unsafe class KTGInputSimulator
             textToType = textToType.Replace('\u301C', '\uFF5E');
         }
 
+        // If in experimental background mode and human typing simulation is disabled,
+        // write the full word directly and submit immediately without delay.
+        if (config.ExperimentalBackgroundMode && !config.SimulateHumanTyping)
+        {
+            if (AddonKTGInput.DirectSetText(textToType) && AddonKTGInput.DirectSubmit(textToType, out _))
+            {
+                JustSubmitted = true;
+                LastSubmittedWord = CurrentWord;
+                CurrentWord = string.Empty;
+                _isSubmittingWord = false;
+                _pendingActions.Clear();
+                _backgroundTypedText.Clear();
+                _stepStopwatch.Restart();
+                return;
+            }
+            // If direct instant submission failed (e.g. addon not ready), queue below so Update handles it
+        }
+
+        if (config.ExperimentalBackgroundMode)
+        {
+            foreach (var ch in textToType)
+            {
+                _pendingActions.Enqueue(new KeyAction(ch));
+            }
+            _pendingActions.Enqueue(new KeyAction(SeVirtualKey.RETURN));
+            _nextDelayMs = GetRandomCharDelay(config);
+            _stepStopwatch.Restart();
+            return;
+        }
+
         foreach (var ch in textToType)
         {
             // For Japanese phrases or Japanese clients, all characters (including numbers, spaces, and punctuation)
@@ -85,14 +121,14 @@ public unsafe class KTGInputSimulator
                 continue;
             }
 
-            if (TryEnqueueCircumflex(ch, _pendingActions))
+            if (!config.ExperimentalBackgroundMode && TryEnqueueCircumflex(ch, _pendingActions))
             {
                 continue;
             }
 
             if (TryCharToVirtualKey(ch, out var vk, out var shift))
             {
-                _pendingActions.Enqueue(new KeyAction(vk, shift));
+                _pendingActions.Enqueue(new KeyAction(vk, shift, ch));
             }
             else
             {
@@ -108,17 +144,29 @@ public unsafe class KTGInputSimulator
         _stepStopwatch.Restart();
     }
 
-    public void Clear()
+    public void Clear(Configuration? config = null)
     {
         _pendingActions.Clear();
+        _backgroundTypedText.Clear();
+        IsDefenseWord = false;
         CurrentWord = string.Empty;
         _isSubmittingWord = false;
         _stepStopwatch.Reset();
+        var cfg = config ?? Plugin.Configuration;
+        if (cfg?.ExperimentalBackgroundMode == true)
+        {
+            AddonKTGInput.DirectClearInput();
+        }
     }
 
     public static bool ShouldBlockInput(Configuration? config = null)
     {
-        var requireFocus = config?.RequireWindowFocus ?? Plugin.Configuration?.RequireWindowFocus ?? true;
+        var cfg = config ?? Plugin.Configuration;
+        if (cfg?.ExperimentalBackgroundMode == true)
+        {
+            return false;
+        }
+        var requireFocus = cfg?.RequireWindowFocus ?? true;
         return requireFocus && !NativeMethods.IsGameFocused();
     }
 
@@ -126,8 +174,18 @@ public unsafe class KTGInputSimulator
     {
         if (!IsTyping)
         {
+            _wasBackgroundMode = config.ExperimentalBackgroundMode;
             return;
         }
+
+        if (_wasBackgroundMode.HasValue && _wasBackgroundMode.Value != config.ExperimentalBackgroundMode)
+        {
+            // Background mode was toggled mid-word: cleanly clear active word and reset state
+            Clear(config);
+            _wasBackgroundMode = config.ExperimentalBackgroundMode;
+            return;
+        }
+        _wasBackgroundMode = config.ExperimentalBackgroundMode;
 
         if (ShouldBlockInput(config))
         {
@@ -147,28 +205,61 @@ public unsafe class KTGInputSimulator
         }
 
         var action = _pendingActions.Dequeue();
-        if (action.IsUnicode)
+
+        if (config.ExperimentalBackgroundMode)
         {
-            SendUnicodeChar(action.Character, config);
-        }
-        else if (action.RequiresShift)
-        {
-            SendKeyWithShift(action.VirtualKey, config);
+            if (!action.IsUnicode && action.VirtualKey == SeVirtualKey.RETURN)
+            {
+                var submittedText = _backgroundTypedText.Length > 0 ? _backgroundTypedText.ToString() : CurrentWord;
+                if (!AddonKTGInput.DirectSubmit(submittedText, out _))
+                {
+                    // Direct submission failed (e.g. addon transitioning); re-enqueue to retry next tick
+                    _pendingActions.Enqueue(action);
+                    _stepStopwatch.Restart();
+                    return;
+                }
+
+                JustSubmitted = true;
+                LastSubmittedWord = CurrentWord;
+                CurrentWord = string.Empty;
+                _isSubmittingWord = false;
+                _pendingActions.Clear();
+                _backgroundTypedText.Clear();
+                _stepStopwatch.Restart();
+                return;
+            }
+
+            if (action.Character != '\0')
+            {
+                _backgroundTypedText.Append(action.Character);
+                AddonKTGInput.DirectSetText(_backgroundTypedText.ToString());
+            }
         }
         else
         {
-            SendKey(action.VirtualKey, config);
-        }
+            if (action.IsUnicode)
+            {
+                SendUnicodeChar(action.Character, config);
+            }
+            else if (action.RequiresShift)
+            {
+                SendKeyWithShift(action.VirtualKey, config);
+            }
+            else
+            {
+                SendKey(action.VirtualKey, config);
+            }
 
-        if (!action.IsUnicode && action.VirtualKey == SeVirtualKey.RETURN)
-        {
-            JustSubmitted = true;
-            LastSubmittedWord = CurrentWord;
-            CurrentWord = string.Empty;
-            _isSubmittingWord = false;
-            _pendingActions.Clear();
-            _stepStopwatch.Restart();
-            return;
+            if (!action.IsUnicode && action.VirtualKey == SeVirtualKey.RETURN)
+            {
+                JustSubmitted = true;
+                LastSubmittedWord = CurrentWord;
+                CurrentWord = string.Empty;
+                _isSubmittingWord = false;
+                _pendingActions.Clear();
+                _stepStopwatch.Restart();
+                return;
+            }
         }
 
         if (_pendingActions.Count > 0)
@@ -197,8 +288,18 @@ public unsafe class KTGInputSimulator
     /// </summary>
     public static bool TryClearInputBuffer(Configuration? config = null)
     {
+        var cfg = config ?? Plugin.Configuration;
+        if (cfg?.ExperimentalBackgroundMode == true)
+        {
+            if (AddonKTGInput.IsInputEmpty())
+            {
+                return false;
+            }
+            return AddonKTGInput.DirectClearInput();
+        }
+
         // 0. NEVER send keys if the game window is not focused!
-        if (ShouldBlockInput(config))
+        if (ShouldBlockInput(config) || !NativeMethods.IsGameFocused())
         {
             return false;
         }
@@ -244,7 +345,8 @@ public unsafe class KTGInputSimulator
 
     public static void SendKey(SeVirtualKey key, Configuration? config = null)
     {
-        if (ShouldBlockInput(config))
+        var cfg = config ?? Plugin.Configuration;
+        if (cfg?.ExperimentalBackgroundMode == true || !NativeMethods.IsGameFocused() || ShouldBlockInput(config))
         {
             return;
         }
@@ -268,6 +370,11 @@ public unsafe class KTGInputSimulator
 
     private static void SendWin32Key(SeVirtualKey key)
     {
+        if (Plugin.Configuration?.ExperimentalBackgroundMode == true || !NativeMethods.IsGameFocused())
+        {
+            return;
+        }
+
         var vk = (byte)key;
         NativeMethods.keybd_event(vk, 0, 0, 0);
         NativeMethods.keybd_event(vk, 0, NativeMethods.KEYEVENTF_KEYUP, 0);
@@ -275,7 +382,8 @@ public unsafe class KTGInputSimulator
 
     public static void SendKeyWithShift(SeVirtualKey key, Configuration? config = null)
     {
-        if (ShouldBlockInput(config))
+        var cfg = config ?? Plugin.Configuration;
+        if (cfg?.ExperimentalBackgroundMode == true || !NativeMethods.IsGameFocused() || ShouldBlockInput(config))
         {
             return;
         }
@@ -362,7 +470,8 @@ public unsafe class KTGInputSimulator
 
     public static void SendUnicodeChar(char c, Configuration? config = null)
     {
-        if (ShouldBlockInput(config))
+        var cfg = config ?? Plugin.Configuration;
+        if (cfg?.ExperimentalBackgroundMode == true || !NativeMethods.IsGameFocused() || ShouldBlockInput(config))
         {
             return;
         }

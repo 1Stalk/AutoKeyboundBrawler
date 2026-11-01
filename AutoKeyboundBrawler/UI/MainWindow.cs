@@ -15,7 +15,7 @@ public class MainWindow : Window, IDisposable
     private const ImGuiWindowFlags BaseFlags =
         ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse | ImGuiWindowFlags.NoCollapse;
 
-    private static readonly Vector2 DefaultSize = new(280, 290);
+    private static readonly Vector2 DefaultSize = new(280, 330);
     private static readonly WindowSizeConstraints CompactConstraints = new()
     {
         MinimumSize = new Vector2(240, HeaderBar.Height),
@@ -225,6 +225,15 @@ public class MainWindow : Window, IDisposable
             {
                 _config.IgnorePunctuation = ignorePunct;
                 _config.Save();
+            }
+
+            var bgMode = _config.ExperimentalBackgroundMode;
+            if (FF7ToggleSwitch.DrawRow("##bg_mode", Loc.Get("BackgroundMode"), Loc.Get("BackgroundModeSub"), ref bgMode,
+                FF7RTheme.AtbGold, Loc.Get("BackgroundModeTip")))
+            {
+                _config.ExperimentalBackgroundMode = bgMode;
+                _config.Save();
+                _automation.ClearTyping();
             }
         }
     }

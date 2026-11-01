@@ -46,6 +46,7 @@ public class Configuration : IPluginConfiguration
     // Safety guards
     public bool StopOnPenaltyCast { get; set; } = true;
     public bool RequireWindowFocus { get; set; } = true;
+    public bool ExperimentalBackgroundMode { get; set; } = false;
 
     // Targeting Priorities & Mechanics
     public bool PrioritizeAdds { get; set; } = true;

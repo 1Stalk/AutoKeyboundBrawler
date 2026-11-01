@@ -95,4 +95,126 @@ public static unsafe class AddonKTGInput
         var text = GetCurrentInputText();
         return string.IsNullOrEmpty(text);
     }
+
+    private static bool? _directSetTextOverride;
+    private static bool? _directSubmitOverride;
+
+    internal static void SetDirectOverridesForTesting(bool? setTextOverride, bool? submitOverride)
+    {
+        _directSetTextOverride = setTextOverride;
+        _directSubmitOverride = submitOverride;
+    }
+
+    /// <summary>
+    /// Injects text directly into KTGInput's AtkComponentTextInput buffer in memory.
+    /// Does not simulate OS or hardware keystrokes.
+    /// </summary>
+    public static bool DirectSetText(string text)
+    {
+        if (_directSetTextOverride.HasValue) return _directSetTextOverride.Value;
+        try
+        {
+            var input = GetTextInput();
+            if (input == null) return false;
+            input->SetText(text);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Clears KTGInput's AtkComponentTextInput buffer directly in memory without sending Escape.
+    /// </summary>
+    public static bool DirectClearInput()
+    {
+        if (_directSetTextOverride.HasValue) return _directSetTextOverride.Value;
+        try
+        {
+            var input = GetTextInput();
+            if (input == null) return false;
+            input->SetText(string.Empty);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Triggers the native submission callback on KTGInput's AtkComponentTextInput (simulating Enter)
+    /// without sending physical OS keystrokes.
+    /// </summary>
+    public static bool DirectSubmit(out bool cleared)
+    {
+        return DirectSubmit(null, out cleared);
+    }
+
+    /// <summary>
+    /// Triggers the native submission callback on KTGInput's AtkComponentTextInput (simulating Enter)
+    /// without sending physical OS keystrokes, using the provided text or buffer text.
+    /// </summary>
+    public static bool DirectSubmit(string? text, out bool cleared)
+    {
+        cleared = false;
+        if (_directSubmitOverride.HasValue)
+        {
+            cleared = true;
+            return _directSubmitOverride.Value;
+        }
+        try
+        {
+            var input = GetTextInput();
+            if (input == null || input->Callback == null) return false;
+
+            var addon = input->OwnerAddon;
+            if (addon == null && !TryGet(out addon)) return false;
+
+            // Ensure text is populated in the component buffer if provided
+            if (!string.IsNullOrEmpty(text))
+            {
+                input->SetText(text);
+            }
+
+            var textPtr = (byte*)input->EvaluatedString.StringPtr;
+            if (textPtr == null || *textPtr == 0)
+            {
+                textPtr = (byte*)input->RawString.StringPtr;
+            }
+
+            // Fallback: encode text if internal pointers are null or empty
+            byte[]? utf8Buffer = null;
+            if (textPtr == null || *textPtr == 0)
+            {
+                var candidate = text ?? GetCurrentInputText();
+                if (string.IsNullOrEmpty(candidate)) return false;
+                utf8Buffer = System.Text.Encoding.UTF8.GetBytes(candidate + "\0");
+            }
+
+            fixed (byte* fallbackPtr = utf8Buffer)
+            {
+                var targetPtr = textPtr != null && *textPtr != 0 ? textPtr : fallbackPtr;
+                if (targetPtr == null || *targetPtr == 0) return false;
+
+                input->Callback(
+                    addon,
+                    InputCallbackType.Enter,
+                    targetPtr,
+                    targetPtr,
+                    input->CallbackEventKind);
+
+                // Always clear the text buffer upon submission to prevent stale leftover input
+                input->SetText(string.Empty);
+                cleared = true;
+                return true;
+            }
+        }
+        catch
+        {
+            return false;
+        }
+    }
 }

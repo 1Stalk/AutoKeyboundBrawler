@@ -792,7 +792,7 @@ public class CoreTests
         Assert.NotNull(defaultSizeField);
         var defaultSize = (System.Numerics.Vector2)defaultSizeField.GetValue(null)!;
         Assert.Equal(280f, defaultSize.X);
-        Assert.Equal(290f, defaultSize.Y);
+        Assert.Equal(330f, defaultSize.Y);
 
         var constraintsField = typeof(AutoKeyboundBrawler.UI.MainWindow).GetField("ExpandedConstraints", flags);
         Assert.NotNull(constraintsField);
@@ -1682,6 +1682,294 @@ public class CoreTests
         }
 
         Assert.False(isHidden, "Plugin UI must not be hidden during cutscenes or loadings under any Dalamud config setting");
+    }
+
+    [Fact]
+    public void TestConfiguration_ExperimentalBackgroundMode_DefaultFalse()
+    {
+        var config = new Configuration();
+        Assert.False(config.ExperimentalBackgroundMode);
+    }
+
+    [Fact]
+    public void TestKTGSafetyGuard_ExperimentalBackgroundMode_FocusBypassAndSafetyPreserved()
+    {
+        try
+        {
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(inDuty: true, inSquare: false);
+            NativeMethods.SetGameFocusedOverrideForTesting(false);
+
+            var configNormal = new Configuration
+            {
+                Enabled = true,
+                MinigameAutoplay = true,
+                RequireWindowFocus = true,
+                ExperimentalBackgroundMode = false
+            };
+
+            // When background mode is disabled, unfocused window blocks typing
+            Assert.False(KTGSafetyGuard.CanType(configNormal, out var reasonNormal));
+            Assert.Equal("Game window is not focused", reasonNormal);
+
+            var configBg = new Configuration
+            {
+                Enabled = true,
+                MinigameAutoplay = true,
+                RequireWindowFocus = true,
+                ExperimentalBackgroundMode = true
+            };
+
+            // When background mode is enabled, unfocused window does NOT block typing
+            Assert.True(KTGSafetyGuard.CanType(configBg, out var reasonBg));
+            Assert.Equal("OK", reasonBg);
+
+            // Safety check: disabled plugin still blocks typing
+            configBg.Enabled = false;
+            Assert.False(KTGSafetyGuard.CanType(configBg, out var reasonDisabled));
+            Assert.Equal("Plugin disabled", reasonDisabled);
+            configBg.Enabled = true;
+
+            // Safety check: minigame autoplay disabled still blocks typing
+            configBg.MinigameAutoplay = false;
+            Assert.False(KTGSafetyGuard.CanType(configBg, out var reasonNoAutoplay));
+            Assert.Equal("Minigame autoplay disabled", reasonNoAutoplay);
+            configBg.MinigameAutoplay = true;
+
+            // Safety check: not in duty still blocks typing
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(inDuty: false, inSquare: false);
+            Assert.False(KTGSafetyGuard.CanType(configBg, out var reasonNotInDuty));
+            Assert.Equal("Not in Keybound Brawler duty", reasonNotInDuty);
+        }
+        finally
+        {
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(null, null);
+            NativeMethods.SetGameFocusedOverrideForTesting(null);
+        }
+    }
+
+    [Fact]
+    public void TestKTGInputSimulator_ShouldBlockInput_BackgroundMode()
+    {
+        try
+        {
+            NativeMethods.SetGameFocusedOverrideForTesting(false);
+
+            var configNormal = new Configuration
+            {
+                RequireWindowFocus = true,
+                ExperimentalBackgroundMode = false
+            };
+            Assert.True(KTGInputSimulator.ShouldBlockInput(configNormal));
+
+            var configBg = new Configuration
+            {
+                RequireWindowFocus = true,
+                ExperimentalBackgroundMode = true
+            };
+            Assert.False(KTGInputSimulator.ShouldBlockInput(configBg));
+
+            NativeMethods.SetGameFocusedOverrideForTesting(true);
+            Assert.False(KTGInputSimulator.ShouldBlockInput(configNormal));
+            Assert.False(KTGInputSimulator.ShouldBlockInput(configBg));
+        }
+        finally
+        {
+            NativeMethods.SetGameFocusedOverrideForTesting(null);
+        }
+    }
+
+    [Fact]
+    public void TestKTGInputSimulator_BackgroundMode_NeverDispatchesWin32Keys()
+    {
+        try
+        {
+            // Even if focused is true, background mode explicitly guards and suppresses Win32 keyboard APIs
+            NativeMethods.SetGameFocusedOverrideForTesting(true);
+
+            var configBg = new Configuration
+            {
+                ExperimentalBackgroundMode = true
+            };
+
+            var exKey = Record.Exception(() => KTGInputSimulator.SendKey(FFXIVClientStructs.FFXIV.Client.System.Input.SeVirtualKey.A, configBg));
+            Assert.Null(exKey);
+
+            var exShift = Record.Exception(() => KTGInputSimulator.SendKeyWithShift(FFXIVClientStructs.FFXIV.Client.System.Input.SeVirtualKey.A, configBg));
+            Assert.Null(exShift);
+
+            var exChar = Record.Exception(() => KTGInputSimulator.SendUnicodeChar('z', configBg));
+            Assert.Null(exChar);
+
+            // In background mode, TryClearInputBuffer checks addon and does not send physical escape
+            var exClear = Record.Exception(() => KTGInputSimulator.TryClearInputBuffer(configBg));
+            Assert.Null(exClear);
+        }
+        finally
+        {
+            NativeMethods.SetGameFocusedOverrideForTesting(null);
+        }
+    }
+
+    [Fact]
+    public void TestKTGInputSimulator_BackgroundMode_EnqueueAndExecution()
+    {
+        try
+        {
+            AddonKTGInput.SetDirectOverridesForTesting(true, true);
+            var sim = new KTGInputSimulator();
+
+            // 1. Instant injection when SimulateHumanTyping is false
+            var configInstant = new Configuration
+            {
+                ExperimentalBackgroundMode = true,
+                SimulateHumanTyping = false
+            };
+            sim.EnqueueWord("SWORD", configInstant);
+            Assert.False(sim.IsTyping);
+            Assert.True(sim.JustSubmitted);
+            Assert.Equal("SWORD", sim.LastSubmittedWord);
+
+            // 2. Instant injection fallback when direct submission fails: gracefully enqueues for Update
+            AddonKTGInput.SetDirectOverridesForTesting(false, false);
+            sim.EnqueueWord("RETRY", configInstant);
+            Assert.True(sim.IsTyping);
+            Assert.Equal(6, sim.RemainingChars); // 'R','E','T','R','Y', Enter
+            AddonKTGInput.SetDirectOverridesForTesting(true, true);
+
+            // 3. Sequential simulation when SimulateHumanTyping is true
+            var configSequential = new Configuration
+            {
+                ExperimentalBackgroundMode = true,
+                SimulateHumanTyping = true,
+                CharDelayMinMs = 10,
+                CharDelayMaxMs = 10
+            };
+            sim.EnqueueWord("DEFENSE", configSequential, isDefense: true);
+            Assert.True(sim.IsTyping);
+            Assert.True(sim.IsDefenseWord);
+            // 7 characters + Enter = 8 actions
+            Assert.Equal(8, sim.RemainingChars);
+
+            // 4. Mid-word mode switch cleanly aborts and resets state
+            var configNormal = new Configuration
+            {
+                ExperimentalBackgroundMode = false,
+                SimulateHumanTyping = true
+            };
+            sim.Update(configNormal);
+            Assert.False(sim.IsTyping);
+            Assert.Equal(0, sim.RemainingChars);
+
+            // Re-enqueue and test Clear
+            sim.EnqueueWord("TEST", configSequential);
+            Assert.True(sim.IsTyping);
+            sim.Clear(configSequential);
+            Assert.False(sim.IsTyping);
+            Assert.False(sim.IsDefenseWord);
+            Assert.Equal(0, sim.RemainingChars);
+        }
+        finally
+        {
+            AddonKTGInput.SetDirectOverridesForTesting(null, null);
+        }
+    }
+
+    [Fact]
+    public void TestLocalization_BackgroundMode_AllFourLanguages()
+    {
+        var prevConfig = Plugin.Configuration;
+        try
+        {
+            Plugin.Configuration = new Configuration();
+
+            var keys = new[] { "BackgroundMode", "BackgroundModeSub", "BackgroundModeTip" };
+            var languages = new[]
+            {
+                Dalamud.Game.ClientLanguage.English,
+                Dalamud.Game.ClientLanguage.Japanese,
+                Dalamud.Game.ClientLanguage.German,
+                Dalamud.Game.ClientLanguage.French,
+            };
+
+            foreach (var lang in languages)
+            {
+                Plugin.Configuration.SelectedLanguage = lang;
+                foreach (var key in keys)
+                {
+                    var text = Loc.Get(key);
+                    Assert.NotNull(text);
+                    Assert.NotEmpty(text);
+                    Assert.NotEqual(key, text);
+                }
+            }
+        }
+        finally
+        {
+            Plugin.Configuration = prevConfig;
+        }
+    }
+
+    [Fact]
+    public void TestAddonKTGInput_DirectOverrides_AndSubmitFallback()
+    {
+        try
+        {
+            AddonKTGInput.SetDirectOverridesForTesting(true, true);
+            Assert.True(AddonKTGInput.DirectSetText("TEST"));
+            Assert.True(AddonKTGInput.DirectClearInput());
+            Assert.True(AddonKTGInput.DirectSubmit("TEST", out var cleared));
+            Assert.True(cleared);
+
+            AddonKTGInput.SetDirectOverridesForTesting(false, false);
+            Assert.False(AddonKTGInput.DirectSetText("TEST"));
+            Assert.False(AddonKTGInput.DirectClearInput());
+            Assert.False(AddonKTGInput.DirectSubmit("TEST", out var cleared2));
+            Assert.True(cleared2);
+        }
+        finally
+        {
+            AddonKTGInput.SetDirectOverridesForTesting(null, null);
+        }
+    }
+
+    [Fact]
+    public void TestKTGInputSimulator_BackgroundMode_AccentAndJapanesePreservation()
+    {
+        var sim = new KTGInputSimulator();
+        var configBg = new Configuration
+        {
+            ExperimentalBackgroundMode = true,
+            SimulateHumanTyping = true,
+            IgnorePunctuation = false
+        };
+
+        // Accented French word with circumflex: "fête"
+        // In background mode, dead key logic is bypassed and 'ê' is enqueued directly
+        sim.EnqueueWord("fête", configBg);
+        Assert.Equal(5, sim.RemainingChars); // 'f', 'ê', 't', 'e', RETURN
+
+        // German word with umlauts: "Größe"
+        sim.EnqueueWord("Größe", configBg);
+        Assert.Equal(6, sim.RemainingChars); // 'G', 'r', 'ö', 'ß', 'e', RETURN
+
+        // Japanese word with wave dash: "チョコボ～"
+        sim.EnqueueWord("チョコボ～", configBg);
+        Assert.Equal(6, sim.RemainingChars); // 4 kana + fullwidth tilde + RETURN
+    }
+
+    [Fact]
+    public void TestKTGAutomationManager_ClearTyping()
+    {
+        var config = new Configuration
+        {
+            ExperimentalBackgroundMode = true,
+            SimulateHumanTyping = true
+        };
+        var mgr = new KTGAutomationManager(config, null);
+        mgr.ClearTyping();
+        Assert.False(mgr.IsTyping);
+        Assert.Equal(0, mgr.RemainingChars);
+        Assert.Equal(string.Empty, mgr.ActiveWord);
     }
 }
 

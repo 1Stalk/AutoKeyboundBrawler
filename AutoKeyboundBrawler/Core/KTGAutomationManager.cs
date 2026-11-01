@@ -255,6 +255,24 @@ public class KTGAutomationManager
         // Only KTGSafetyGuard halt (step 1) can abort mid-type.
         if (_simulator.IsTyping)
         {
+            if (_config.AbortForDefense && !_simulator.IsDefenseWord)
+            {
+                var currentTargets = AddonKTGEWord.ReadActiveTargets();
+                var currentCasts = AddonKTGEnemyCastBar.ReadActiveCasts();
+                if (KTGStateReader.HasActiveDefenseSentenceOnScreen(currentTargets, currentCasts, out var defenseTarget) &&
+                    defenseTarget != null && !string.IsNullOrWhiteSpace(defenseTarget.Word))
+                {
+                    _log?.Information($"[AutoKeyboundBrawler] Aborting typing for urgent defense prompt: \"{defenseTarget.Word}\"");
+                    _simulator.Clear();
+                    KTGInputSimulator.TryClearInputBuffer(_config);
+                    _lastTargetSlotId = defenseTarget.SlotId;
+                    _lastTargetWord = defenseTarget.Word;
+                    CurrentStatus = $"[DEFENSE SENTENCE] Enqueued: \"{defenseTarget.Word}\"";
+                    _simulator.EnqueueWord(defenseTarget.Word, _config, isDefense: true);
+                    return;
+                }
+            }
+
             CurrentStatus = $"Typing: \"{_simulator.CurrentWord}\" ({_simulator.RemainingChars} left)";
             _simulator.Update(_config);
             return;
@@ -285,7 +303,7 @@ public class KTGAutomationManager
 
             CurrentStatus = $"{tag} Enqueued: \"{target.Word}\"";
             _log?.Information($"[AutoKeyboundBrawler] Target selected {tag} (Slot {target.SlotId}, ScreenY {target.ScreenY:F1}): \"{target.Word}\"");
-            _simulator.EnqueueWord(target.Word, _config);
+            _simulator.EnqueueWord(target.Word, _config, isDefense);
         }
         else
         {
@@ -295,6 +313,14 @@ public class KTGAutomationManager
 
     private bool HandleHaltRecovery()
     {
+        if (_config.ExperimentalBackgroundMode)
+        {
+            AddonKTGInput.DirectClearInput();
+            _wasInHalt = false;
+            _haltRecoveryState = HaltRecoveryState.None;
+            return false;
+        }
+
         switch (_haltRecoveryState)
         {
             case HaltRecoveryState.SendEnter:
@@ -786,9 +812,17 @@ public class KTGAutomationManager
         ConsumeHumanizedDelay("npcInteract");
     }
 
+    public void ClearTyping()
+    {
+        _simulator.Clear(_config);
+        KTGInputSimulator.TryClearInputBuffer(_config);
+        _lastTargetSlotId = -1;
+        _lastTargetWord = string.Empty;
+    }
+
     public void Reset()
     {
-        _simulator.Clear();
+        _simulator.Clear(_config);
         _nav.Stop();
         _squareSubPhase = SquareSubPhase.Default;
         _lastTargetSlotId = -1;
