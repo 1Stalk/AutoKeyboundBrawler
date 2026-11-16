@@ -8,7 +8,7 @@ using System.Linq;
 
 namespace AutoKeyboundBrawler.Interop;
 
-public record KTGActiveCast(int SlotId, string SpellName);
+public record KTGActiveCast(int SlotId, string SpellName, bool IsInterrupted = false);
 
 public static unsafe class AddonKTGEnemyCastBar
 {
@@ -34,15 +34,22 @@ public static unsafe class AddonKTGEnemyCastBar
     private static DateTime _lastInputsReEnabledTime = DateTime.MinValue;
 
     private static (bool Active, string Reason)? _stopTypingOverrideForTesting;
+    private static List<KTGActiveCast>? _activeCastsOverrideForTesting;
 
     internal static void SetStopTypingOverrideForTesting(bool? active, string? reason = null)
     {
         _stopTypingOverrideForTesting = active.HasValue ? (active.Value, reason ?? "Test Penalty Cast") : null;
     }
 
+    internal static void SetActiveCastsOverrideForTesting(List<KTGActiveCast>? casts)
+    {
+        _activeCastsOverrideForTesting = casts;
+    }
+
     public static void Reset()
     {
         _stopTypingOverrideForTesting = null;
+        _activeCastsOverrideForTesting = null;
         _postCastHoldUntil = DateTime.MinValue;
         _lastAvoidedSpellName = string.Empty;
         _wasCastingHaltSpell = false;
@@ -71,6 +78,11 @@ public static unsafe class AddonKTGEnemyCastBar
 
     public static List<KTGActiveCast> ReadActiveCasts()
     {
+        if (_activeCastsOverrideForTesting != null)
+        {
+            return _activeCastsOverrideForTesting;
+        }
+
         var casts = new List<KTGActiveCast>();
         if (!TryGetCastBar(out var castBar) || !castBar->IsReady)
         {
@@ -89,9 +101,10 @@ public static unsafe class AddonKTGEnemyCastBar
                 if (!string.IsNullOrWhiteSpace(text))
                 {
                     text = text.Trim();
+                    var isInterrupted = KTGLocalizationRegistry.IsInterruptedText(text);
                     if (text.Length > 2 && text.Any(char.IsLetter))
                     {
-                        casts.Add(new KTGActiveCast((int)node->NodeId, text));
+                        casts.Add(new KTGActiveCast((int)node->NodeId, text, isInterrupted));
                     }
                 }
                 continue;
@@ -102,6 +115,21 @@ public static unsafe class AddonKTGEnemyCastBar
             {
                 var comp = (AtkComponentNode*)node;
                 if (comp->Component == null) continue;
+
+                // Check if any visible child indicates the cast was interrupted
+                var isInterrupted = false;
+                for (var j = 0; j < comp->Component->UldManager.NodeListCount; j++)
+                {
+                    var child = comp->Component->UldManager.NodeList[j];
+                    if (child == null || child->Type != NodeType.Text || !GUINodeUtils.IsNodeActuallyVisible(child, node)) continue;
+
+                    var childText = GUINodeUtils.GetNodeText(child);
+                    if (!string.IsNullOrWhiteSpace(childText) && KTGLocalizationRegistry.IsInterruptedText(childText))
+                    {
+                        isInterrupted = true;
+                        break;
+                    }
+                }
 
                 for (var j = 0; j < comp->Component->UldManager.NodeListCount; j++)
                 {
@@ -115,10 +143,7 @@ public static unsafe class AddonKTGEnemyCastBar
                     if (!string.IsNullOrWhiteSpace(text))
                     {
                         text = text.Trim();
-                        if (string.Equals(text, "Interrupted!", StringComparison.OrdinalIgnoreCase) ||
-                            string.Equals(text, "中断！", StringComparison.OrdinalIgnoreCase) ||
-                            string.Equals(text, "Unterbrochen!", StringComparison.OrdinalIgnoreCase) ||
-                            string.Equals(text, "Interrompu !", StringComparison.OrdinalIgnoreCase) ||
+                        if (KTGLocalizationRegistry.IsInterruptedText(text) ||
                             string.Equals(text, "Casting", StringComparison.OrdinalIgnoreCase))
                         {
                             continue;
@@ -126,7 +151,7 @@ public static unsafe class AddonKTGEnemyCastBar
 
                         if (text.Length >= 2 && text.Any(char.IsLetter))
                         {
-                            casts.Add(new KTGActiveCast((int)node->NodeId, text));
+                            casts.Add(new KTGActiveCast((int)node->NodeId, text, isInterrupted));
                         }
                     }
                 }
@@ -134,6 +159,62 @@ public static unsafe class AddonKTGEnemyCastBar
         }
 
         return casts;
+    }
+
+    /// <summary>
+    /// Checks if an active enemy cast is interruptible (flashing red cast bar with countdown hits).
+    /// Queries known interruptible spell names and IDs, as well as live IBattleChara.IsCastInterruptible.
+    /// </summary>
+    public static bool IsCastInterruptible(KTGActiveCast cast)
+    {
+        if (cast == null || cast.IsInterrupted) return false;
+
+        // 1. Check known interruptible actions / localized spell names
+        if (KTGLocalizationRegistry.IsInterruptibleCast(cast.SpellName))
+        {
+            return true;
+        }
+
+        // 2. Scan Svc.Objects for matching IBattleChara and check IsCastInterruptible
+        try
+        {
+            if (Svc.Objects != null)
+            {
+                var actionSheet = Svc.Data?.GetExcelSheet<Lumina.Excel.Sheets.Action>();
+                foreach (var obj in Svc.Objects)
+                {
+                    if (obj is Dalamud.Game.ClientState.Objects.Types.IBattleChara chara && chara.IsCasting)
+                    {
+                        if (chara.IsCastInterruptible)
+                        {
+                            var actionId = chara.CastActionId;
+                            if (actionId > 0 && KTGLocalizationRegistry.IsInterruptibleCast(null, actionId))
+                            {
+                                return true;
+                            }
+
+                            var actionName = actionSheet?.GetRowOrDefault(actionId)?.Name.ToString();
+                            if (!string.IsNullOrEmpty(actionName) && (string.Equals(actionName, cast.SpellName, StringComparison.OrdinalIgnoreCase) ||
+                                                                      KTGLocalizationRegistry.IsInterruptibleCast(actionName, actionId)))
+                            {
+                                return true;
+                            }
+
+                            if (cast.SlotId > 0 && chara.EntityId == cast.SlotId)
+                            {
+                                return true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        catch
+        {
+            // Object table scan safety
+        }
+
+        return false;
     }
 
     /// <summary>

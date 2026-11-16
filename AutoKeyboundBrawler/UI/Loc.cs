@@ -112,6 +112,21 @@ public static class Loc
             ("AutoBuyCoffersTip", ClientLanguage.French) => "À 9 500+ MGC : va chez la négociante acheter des coffres, puis revient à la préposée.",
             ("AutoBuyCoffersTip", _) => "At 9,500+ MGC, walks to MGC Trader to purchase coffers, then returns to Registrar.",
 
+            ("PriorInterrupts", ClientLanguage.Japanese) => "詠唱中断を最優先",
+            ("PriorInterrupts", ClientLanguage.German) => "Unterbrechungen priorisieren",
+            ("PriorInterrupts", ClientLanguage.French) => "Priorité aux interruptions",
+            ("PriorInterrupts", _) => "Prioritize Interrupts",
+
+            ("PriorInterruptsSub", ClientLanguage.Japanese) => "赤枠の危険詠唱 (メインカノン等) を優先撃破",
+            ("PriorInterruptsSub", ClientLanguage.German) => "Fokussiert rot blinkende Zauberbalken",
+            ("PriorInterruptsSub", ClientLanguage.French) => "Cible les sorts interruptibles clignotants",
+            ("PriorInterruptsSub", _) => "Focus flashing red cast bars (Main Cannon, Burr Burrow, etc.)",
+
+            ("PriorInterruptsTip", ClientLanguage.Japanese) => "赤枠で点滅する危険な詠唱中の敵（ボス・雑魚問わず）を一般雑魚より優先して撃破・中断します。",
+            ("PriorInterruptsTip", ClientLanguage.German) => "Priorisiert Gegner, die unterbrechbare Zauber wirken, um Gruppen-Wipes zu verhindern.",
+            ("PriorInterruptsTip", ClientLanguage.French) => "Cible en priorité les ennemis lançant des sorts interruptibles pour éviter l'échec de la mission.",
+            ("PriorInterruptsTip", _) => "Automatically prioritizes enemies casting interruptible spells before regular adds to prevent duty wipes.",
+
             ("IgnorePunct", ClientLanguage.Japanese) => "句読点・記号の省略",
             ("IgnorePunct", ClientLanguage.German) => "Satzzeichen ignorieren",
             ("IgnorePunct", ClientLanguage.French) => "Ignorer la ponctuation",
@@ -143,6 +158,11 @@ public static class Loc
             ("MaxCharDelay", ClientLanguage.German) => "Max. Tastenverzögerung",
             ("MaxCharDelay", ClientLanguage.French) => "Délai max. entre frappes",
             ("MaxCharDelay", _) => "Max Keystroke Delay",
+
+            ("StartDelay", ClientLanguage.Japanese) => "入力開始遅延 (ms)",
+            ("StartDelay", ClientLanguage.German) => "Startverzögerung (ms)",
+            ("StartDelay", ClientLanguage.French) => "Délai avant saisie (ms)",
+            ("StartDelay", _) => "Start Typing Delay",
 
             ("SubDelay", ClientLanguage.Japanese) => "決定 (Enter) 遅延 (ms)",
             ("SubDelay", ClientLanguage.German) => "Bestätigungsverzögerung",

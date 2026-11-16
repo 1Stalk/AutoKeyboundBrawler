@@ -133,6 +133,8 @@ public static unsafe class AddonKTGEWord
 
             if ((int)node->Type >= 1000)
             {
+                if (!GUINodeUtils.IsNodeActuallyVisible(node)) continue;
+
                 var screenY = node->ScreenY != 0 ? node->ScreenY : node->Y;
                 if (screenY < -500f) continue;
 

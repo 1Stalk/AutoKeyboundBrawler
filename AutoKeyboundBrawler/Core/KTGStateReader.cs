@@ -276,9 +276,14 @@ public static unsafe class KTGStateReader
     public static bool HasActiveDefenseSentenceOnScreen(
         IReadOnlyList<KTGTargetWord> targets,
         IReadOnlyList<KTGActiveCast>? casts,
-        out KTGTargetWord? defenseTarget)
+        out KTGTargetWord? defenseTarget,
+        string? recentlySubmittedWord = null,
+        double recentSubmitAgeMs = 9999)
     {
-        defenseTarget = targets.FirstOrDefault(t => t.SlotId != 2 && IsDefenseSentence(t.Word, t.SlotId, t.ScreenY, casts));
+        defenseTarget = targets.FirstOrDefault(t =>
+            t.SlotId != 2 &&
+            IsDefenseSentence(t.Word, t.SlotId, t.ScreenY, casts) &&
+            (string.IsNullOrEmpty(recentlySubmittedWord) || recentSubmitAgeMs >= 2500 || !IsSameWord(t.Word, recentlySubmittedWord)));
         return defenseTarget != null;
     }
 
@@ -456,6 +461,16 @@ public static unsafe class KTGStateReader
             }
         }
 
+        // Tier 2: Interruptible Attack (flashing red cast bars like Burr Burrow, Main Cannon, Big Bomber)
+        if (config.PrioritizeInterrupts && activeCasts != null)
+        {
+            var matchCast = activeCasts.FirstOrDefault(c => c.SlotId == target.SlotId && !c.IsInterrupted);
+            if (matchCast != null && AddonKTGEnemyCastBar.IsCastInterruptible(matchCast))
+            {
+                return 2;
+            }
+        }
+
         // Tier 2: Other casting adds (e.g. Burst)
         if (target.SlotId != 2 && otherCastingSlotIds.Contains(target.SlotId))
         {
@@ -585,7 +600,7 @@ public static unsafe class KTGStateReader
         // 1. ABSOLUTE TOP PRIORITY: Defensive Sentence (Player Shield)
         // If an active, unsubmitted defense prompt is on screen, IMMEDIATELY select it before anything else!
         // Never targets boss first when a defense phrase is already on screen.
-        if (config.PrioritizeDefense && HasActiveDefenseSentenceOnScreen(targets, activeCasts, out var defenseTarget) && defenseTarget != null)
+        if (config.PrioritizeDefense && HasActiveDefenseSentenceOnScreen(targets, activeCasts, out var defenseTarget, recentlySubmittedWord, recentSubmitAgeMs) && defenseTarget != null)
         {
             var resolvedWord = defenseTarget.Word;
             if (IsObscuredWord(resolvedWord))
@@ -720,20 +735,23 @@ public static unsafe class KTGStateReader
             return null;
         }
 
-        // Filter out recently submitted word (prevents re-targeting same mob within 1.2s)
-        if (!string.IsNullOrEmpty(recentlySubmittedWord) && recentSubmitAgeMs < 1200)
+        // Filter out recently submitted word (prevents re-targeting same mob or recently submitted prompt within 1.5s)
+        if (!string.IsNullOrEmpty(recentlySubmittedWord) && recentSubmitAgeMs < 1500)
         {
-            var filtered = candidates.Where(t => IsDefenseSentence(t.Word, t.SlotId, t.ScreenY) || !IsSameWord(t.Word, recentlySubmittedWord)).ToList();
-            if (filtered.Count > 0)
-            {
-                candidates = filtered;
-            }
+            var filtered = candidates.Where(t => !IsSameWord(t.Word, recentlySubmittedWord)).ToList();
+            candidates = filtered;
+        }
+
+        if (candidates.Count == 0)
+        {
+            return null;
         }
 
         var needleSlotIds = new HashSet<int>();
         var otherCastingSlotIds = new HashSet<int>();
         foreach (var c in activeCasts)
         {
+            if (c.IsInterrupted) continue;
             if (AddonKTGEnemyCastBar.IsNeedlesSpell(c.SpellName))
             {
                 needleSlotIds.Add(c.SlotId);
@@ -787,16 +805,21 @@ public static unsafe class KTGStateReader
         return null;
     }
 
-    public static void InvalidateSubmittedWord(string word)
+    public static void InvalidateSubmittedWord(string word, int slotId = -1)
     {
+        if (slotId >= 0)
+        {
+            _targetCache.Remove(slotId);
+        }
+
         if (string.IsNullOrWhiteSpace(word)) return;
 
         List<int>? matches = null;
-        foreach (var (slotId, cached) in _targetCache)
+        foreach (var (sId, cached) in _targetCache)
         {
             if (IsSameWord(cached.Word, word))
             {
-                (matches ??= new()).Add(slotId);
+                (matches ??= new()).Add(sId);
             }
         }
 

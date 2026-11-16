@@ -208,6 +208,15 @@ public class KTGAutomationManager
             CurrentStatus = $"SAFETY HALT: {safetyReason}";
             _wasInHalt = true;
 
+            if (AddonKTGEnemyCastBar.IsStopTypingActive())
+            {
+                // Issue #14: Do NOT clear the input buffer or the simulator during no-typing penalty spells!
+                // The game does NOT penalize characters already in the input box; it only penalizes sending inputs.
+                _simulator.Pause();
+                return;
+            }
+
+            // For actual interruptions (stun, cutscene, wave end), clear safely
             _lastTargetSlotId = -1;
             _lastTargetWord = string.Empty;
             if (_simulator.IsTyping)
@@ -223,9 +232,32 @@ public class KTGAutomationManager
         // In background mode, clear the minigame text input buffer directly in memory
         if (_wasInHalt)
         {
-            if (HandleHaltRecovery())
+            _wasInHalt = false;
+            if (_simulator.IsTyping)
             {
-                return;
+                var recoverySlotIds = AddonKTGEWord.ReadActiveSlotIds();
+                var recoveryTargets = AddonKTGEWord.ReadActiveTargets();
+                var isStillValid = _simulator.IsDefenseWord ||
+                                   (_lastTargetSlotId >= 0 && recoverySlotIds.Contains(_lastTargetSlotId)) ||
+                                   recoveryTargets.Any(t => t.SlotId == _lastTargetSlotId || KTGStateReader.IsSameWord(t.Word, _simulator.CurrentWord));
+
+                if (isStillValid)
+                {
+                    _log?.Information($"[AutoKeyboundBrawler] Halt ended. Resuming typing for \"{_simulator.CurrentWord}\" (Slot {_lastTargetSlotId}).");
+                    _simulator.Resume(150);
+                }
+                else
+                {
+                    _log?.Information($"[AutoKeyboundBrawler] Target for \"{_simulator.CurrentWord}\" (Slot {_lastTargetSlotId}) died during halt. Clearing.");
+                    _simulator.Clear();
+                    KTGInputSimulator.TryClearInputBuffer(_config);
+                    _lastTargetSlotId = -1;
+                    _lastTargetWord = string.Empty;
+                }
+            }
+            else
+            {
+                HandleHaltRecovery();
             }
         }
 
@@ -237,7 +269,7 @@ public class KTGAutomationManager
             _simulator.JustSubmitted = false;
 
             // Invalidate submitted word from memory cache immediately
-            KTGStateReader.InvalidateSubmittedWord(_lastSubmittedWord);
+            KTGStateReader.InvalidateSubmittedWord(_lastSubmittedWord, _lastTargetSlotId);
         }
 
         var submitAgeMs = (DateTime.UtcNow - _lastSubmissionTime).TotalMilliseconds;
@@ -304,7 +336,7 @@ public class KTGAutomationManager
                 if (_config.AbortForDefense && !_simulator.IsDefenseWord)
                 {
                     var currentCasts = AddonKTGEnemyCastBar.ReadActiveCasts();
-                    if (KTGStateReader.HasActiveDefenseSentenceOnScreen(currentTargets, currentCasts, out var defenseTarget) &&
+                    if (KTGStateReader.HasActiveDefenseSentenceOnScreen(currentTargets, currentCasts, out var defenseTarget, _lastSubmittedWord, submitAgeMs) &&
                         defenseTarget != null && !string.IsNullOrWhiteSpace(defenseTarget.Word))
                     {
                         _log?.Information($"[AutoKeyboundBrawler] Aborting typing for urgent defense prompt: \"{defenseTarget.Word}\"");
@@ -313,7 +345,7 @@ public class KTGAutomationManager
                         _lastTargetSlotId = defenseTarget.SlotId;
                         _lastTargetWord = defenseTarget.Word;
                         CurrentStatus = $"[DEFENSE SENTENCE] Enqueued: \"{defenseTarget.Word}\"";
-                        _simulator.EnqueueWord(defenseTarget.Word, _config, isDefense: true);
+                        _simulator.EnqueueWord(defenseTarget.Word, _config, isDefense: true, isEmergency: true);
                         return;
                     }
                 }
@@ -349,7 +381,7 @@ public class KTGAutomationManager
 
             CurrentStatus = $"{tag} Enqueued: \"{target.Word}\"";
             _log?.Information($"[AutoKeyboundBrawler] Target selected {tag} (Slot {target.SlotId}, ScreenY {target.ScreenY:F1}): \"{target.Word}\"");
-            _simulator.EnqueueWord(target.Word, _config, isDefense);
+            _simulator.EnqueueWord(target.Word, _config, isDefense: isDefense, isEmergency: isNeedles, applyStartDelay: true);
         }
         else
         {

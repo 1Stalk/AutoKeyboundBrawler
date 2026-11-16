@@ -1618,14 +1618,14 @@ public class CoreTests
             Assert.True(manager.IsTyping);
             Assert.Equal("Airbuster", manager.ActiveWord);
 
-            // Penalty cast active in duty -> triggers safety halt
-            AddonKTGEnemyCastBar.SetStopTypingOverrideForTesting(true, "Dynamic Sensory Jammer");
+            // Player stun in duty -> triggers safety halt and aborts active typing
+            KTGSafetyGuard.SetPlayerStunnedOverrideForTesting(true);
             manager.Tick();
 
-            // When safety guard fails CanType in duty, manager enters SAFETY HALT and aborts typing
+            // When safety guard fails CanType due to genuine interruption (stun), manager enters SAFETY HALT and aborts typing
             Assert.Equal(EventPhase.InMinigame, manager.CurrentPhase);
             Assert.StartsWith("SAFETY HALT:", manager.CurrentStatus);
-            Assert.Contains("Dynamic Sensory Jammer", manager.CurrentStatus);
+            Assert.Contains("Stunned", manager.CurrentStatus);
             Assert.True(manager.IsHaltStatus);
             Assert.False(manager.IsTyping);
             Assert.Equal(string.Empty, manager.ActiveWord);
@@ -1633,6 +1633,7 @@ public class CoreTests
         finally
         {
             AddonKTGEnemyCastBar.Reset();
+            KTGSafetyGuard.SetPlayerStunnedOverrideForTesting(null);
             KTGSafetyGuard.SetTerritoryOverridesForTesting(null, null);
         }
     }
@@ -2860,6 +2861,235 @@ public class CoreTests
             AddonKTGEWord.SetActiveTargetsOverrideForTesting(null);
             KTGSafetyGuard.SetTerritoryOverridesForTesting(null, null);
             AddonKTGInput.SetCanAcceptInputOverrideForTesting(null);
+            KTGStateReader.ClearCache();
+        }
+    }
+
+    // ========================================================================
+    // ISSUES #10, #13, #14, #15 TESTS
+    // ========================================================================
+
+    [Fact]
+    public void TestIssue10_StartTypingDelay_AppliedForNewTarget_BypassedForDefenseAndEmergency()
+    {
+        var config = new Configuration
+        {
+            StartTypingDelayMs = 300,
+            CharDelayMinMs = 10,
+            CharDelayMaxMs = 20,
+            SimulateHumanTyping = true
+        };
+
+        var sim = new KTGInputSimulator();
+        var delayField = typeof(KTGInputSimulator).GetField("_nextDelayMs", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        Assert.NotNull(delayField);
+
+        // 1. Regular target with applyStartDelay = true -> delay includes StartTypingDelayMs (~300ms + charDelay)
+        sim.EnqueueWord("AttackPrompt", config, isDefense: false, isEmergency: false, applyStartDelay: true);
+        var regularDelay = (long)delayField.GetValue(sim)!;
+        Assert.True(regularDelay >= 270, $"Expected >= 270ms start delay with jitter, got {regularDelay}");
+
+        // 2. Urgent Defense Sentence -> start delay bypassed (0ms initial delay)
+        sim.EnqueueWord("PlayerDefense", config, isDefense: true, isEmergency: false, applyStartDelay: true);
+        var defenseDelay = (long)delayField.GetValue(sim)!;
+        Assert.True(defenseDelay <= 30, $"Expected defense start delay to be bypassed (<30ms), got {defenseDelay}");
+
+        // 3. Emergency Needles Cast -> start delay bypassed (0ms initial delay)
+        sim.EnqueueWord("NeedlesCactuar", config, isDefense: false, isEmergency: true, applyStartDelay: true);
+        var emergencyDelay = (long)delayField.GetValue(sim)!;
+        Assert.True(emergencyDelay <= 30, $"Expected emergency start delay to be bypassed (<30ms), got {emergencyDelay}");
+
+        // 4. Submission uses standard character delay, not old SubmissionDelayMs
+        config.SubmissionDelayMs = 500;
+        config.CharDelayMinMs = 15;
+        config.CharDelayMaxMs = 25;
+        sim.EnqueueWord("AB", config, applyStartDelay: false); // 2 chars + submit
+        var d1 = (long)delayField.GetValue(sim)!;
+        Assert.True(d1 <= 35);
+    }
+
+    [Fact]
+    public void TestIssue13_InterruptibleRedAttacks_CatalogAndPriority()
+    {
+        // 1. Catalog verification
+        Assert.True(KTGLocalizationRegistry.IsInterruptibleCast("Burr Burrow"));
+        Assert.True(KTGLocalizationRegistry.IsInterruptibleCast("burr burrow"));
+        Assert.True(KTGLocalizationRegistry.IsInterruptibleCast("針孔潜り"));
+        Assert.True(KTGLocalizationRegistry.IsInterruptibleCast(null, 49548));
+        Assert.True(KTGLocalizationRegistry.IsInterruptibleCast("Main Cannon"));
+        Assert.True(KTGLocalizationRegistry.IsInterruptibleCast("Big Bomber"));
+
+        // 2. Priority evaluation
+        var config = new Configuration
+        {
+            PrioritizeInterrupts = true,
+            PrioritizeAdds = true
+        };
+
+        var bossTarget = new KTGTargetWord(2, "MandragoraBoss", 400f, 100f);
+        var regularAdd = new KTGTargetWord(10, "RegularAdd", 500f, 100f);
+
+        // When boss is casting Burr Burrow (active, not interrupted)
+        var activeCastsBurr = new List<KTGActiveCast>
+        {
+            new(2, "Burr Burrow", IsInterrupted: false)
+        };
+
+        var bossPriority = KTGStateReader.GetTargetPriority(bossTarget, true, new HashSet<int>(), new HashSet<int> { 2 }, false, null, config, activeCastsBurr);
+        var addPriority = KTGStateReader.GetTargetPriority(regularAdd, true, new HashSet<int>(), new HashSet<int> { 2 }, false, null, config, activeCastsBurr);
+
+        // Boss casting interruptible attack must get Tier 2, beating regular add (Tier 4)
+        Assert.Equal(2, bossPriority);
+        Assert.Equal(4, addPriority);
+        Assert.True(bossPriority < addPriority, "Boss interruptible attack must have higher priority than regular add!");
+
+        // 3. Once interrupted ("Interrupted!"), boss priority returns to normal (Tier 7)
+        var activeCastsInterrupted = new List<KTGActiveCast>
+        {
+            new(2, "Burr Burrow", IsInterrupted: true)
+        };
+
+        var bossInterruptedPriority = KTGStateReader.GetTargetPriority(bossTarget, true, new HashSet<int>(), new HashSet<int>(), false, null, config, activeCastsInterrupted);
+        Assert.Equal(7, bossInterruptedPriority);
+        Assert.True(addPriority < bossInterruptedPriority, "Regular add must beat interrupted boss!");
+
+        // 4. When PrioritizeInterrupts is false, boss remains normal low priority (Tier 6/7)
+        var configNoInterrupts = new Configuration
+        {
+            PrioritizeInterrupts = false,
+            PrioritizeAdds = true
+        };
+        var bossDisabledPriority = KTGStateReader.GetTargetPriority(bossTarget, true, new HashSet<int>(), new HashSet<int> { 2 }, false, null, configNoInterrupts, activeCastsBurr);
+        Assert.Equal(6, bossDisabledPriority);
+    }
+
+    [Fact]
+    public void TestIssue14_SafetyHalt_NoTypingPenalty_PausesAndResumesWithoutErasing()
+    {
+        try
+        {
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(inDuty: true, inSquare: false);
+            AddonKTGInput.SetDirectOverridesForTesting(true, true);
+
+            var config = new Configuration
+            {
+                Enabled = true,
+                MinigameAutoplay = true,
+                StopOnPenaltyCast = true
+            };
+
+            var manager = new KTGAutomationManager(config, null);
+
+            // Pre-condition: start typing a target word
+            AddonKTGEWord.SetActiveSlotsOverrideForTesting(new List<int> { 101 });
+            AddonKTGEWord.SetActiveTargetsOverrideForTesting(new List<KTGTargetWord>
+            {
+                new(101, "LongTargetWord", 500f, 100f)
+            });
+
+            manager.Tick();
+            Assert.True(manager.IsTyping);
+            Assert.Equal("LongTargetWord", manager.ActiveWord);
+
+            var simField = typeof(KTGAutomationManager).GetField("_simulator", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            Assert.NotNull(simField);
+            var sim = (KTGInputSimulator)simField.GetValue(manager)!;
+
+            // 1. Penalty cast triggers (Dynamic Sensory Jammer / Cursed Gaze)
+            AddonKTGEnemyCastBar.SetStopTypingOverrideForTesting(true, "Dynamic Sensory Jammer");
+            manager.Tick();
+
+            // Must enter SAFETY HALT, but simulator MUST be paused (NOT cleared!)
+            Assert.True(manager.IsHaltStatus);
+            Assert.True(sim.IsPaused);
+            Assert.True(manager.IsTyping);
+            Assert.Equal("LongTargetWord", manager.ActiveWord);
+
+            // 2. Halt lifts and target is still alive -> resumes smoothly without clearing
+            AddonKTGEnemyCastBar.SetStopTypingOverrideForTesting(false);
+            manager.Tick();
+
+            Assert.False(manager.IsHaltStatus);
+            Assert.False(sim.IsPaused);
+            Assert.True(manager.IsTyping);
+            Assert.Equal("LongTargetWord", manager.ActiveWord);
+
+            // 3. If target died while halted -> on halt recovery, it cleans cleanly
+            AddonKTGEnemyCastBar.SetStopTypingOverrideForTesting(true, "Cursed Gaze");
+            manager.Tick();
+            Assert.True(manager.IsHaltStatus);
+            Assert.True(sim.IsPaused);
+
+            // Mob dies while player holds still
+            AddonKTGEWord.SetActiveSlotsOverrideForTesting(new List<int>());
+            AddonKTGEWord.SetActiveTargetsOverrideForTesting(new List<KTGTargetWord>());
+            AddonKTGEnemyCastBar.SetStopTypingOverrideForTesting(false);
+            manager.Tick();
+
+            // Now simulator should be cleared because target died
+            Assert.False(manager.IsTyping);
+            Assert.Equal(string.Empty, manager.ActiveWord);
+        }
+        finally
+        {
+            AddonKTGEnemyCastBar.Reset();
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(null, null);
+            AddonKTGEWord.SetActiveSlotsOverrideForTesting(null);
+            AddonKTGEWord.SetActiveTargetsOverrideForTesting(null);
+            AddonKTGInput.SetDirectOverridesForTesting(null, null);
+            KTGStateReader.ClearCache();
+        }
+    }
+
+    [Fact]
+    public void TestIssue15_DeadMobAndFadingDefenseSentence_NeverRetyped()
+    {
+        try
+        {
+            var config = new Configuration
+            {
+                PrioritizeDefense = true,
+                MemoryModeObscured = true
+            };
+
+            // 1. GetBestTarget returns null if only candidate is the recently submitted word (does not revert to dead mob)
+            var targets = new List<KTGTargetWord>
+            {
+                new(105, "DeadMobWord", 500f, 100f)
+            };
+            AddonKTGEWord.SetActiveSlotsOverrideForTesting(new List<int> { 105 });
+            AddonKTGEWord.SetActiveTargetsOverrideForTesting(targets);
+
+            // Submitted 400ms ago -> must return null, never re-select DeadMobWord!
+            var bestTarget = KTGStateReader.GetBestTarget(config, recentlySubmittedWord: "DeadMobWord", recentSubmitAgeMs: 400);
+            Assert.Null(bestTarget);
+
+            // 2. HasActiveDefenseSentenceOnScreen debounces recently submitted defense sentences within 2.5s
+            var defenseTargets = new List<KTGTargetWord>
+            {
+                new(106, "防御壁展開", 734f, 100f) // ScreenY 734 is defense line
+            };
+
+            // Case A: Just submitted 500ms ago -> debounced as fading, returns false
+            var hasDefenseFading = KTGStateReader.HasActiveDefenseSentenceOnScreen(
+                defenseTargets, null, out var targetA, recentlySubmittedWord: "防御壁展開", recentSubmitAgeMs: 500);
+            Assert.False(hasDefenseFading);
+            Assert.Null(targetA);
+
+            // Case B: Submitted 3000ms ago (cooldown expired) -> active again, returns true
+            var hasDefenseFresh = KTGStateReader.HasActiveDefenseSentenceOnScreen(
+                defenseTargets, null, out var targetB, recentlySubmittedWord: "防御壁展開", recentSubmitAgeMs: 3000);
+            Assert.True(hasDefenseFresh);
+            Assert.NotNull(targetB);
+            Assert.Equal("防御壁展開", targetB.Word);
+
+            // 3. InvalidateSubmittedWord with slotId immediately purges slot from cache
+            KTGStateReader.InvalidateSubmittedWord("AnyWord", 106);
+        }
+        finally
+        {
+            AddonKTGEWord.SetActiveSlotsOverrideForTesting(null);
+            AddonKTGEWord.SetActiveTargetsOverrideForTesting(null);
             KTGStateReader.ClearCache();
         }
     }

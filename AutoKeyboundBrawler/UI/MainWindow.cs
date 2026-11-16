@@ -194,6 +194,14 @@ public class MainWindow : Window, IDisposable
                 _config.SetAutoBuyCoffers(autoBuy);
             }
 
+            var priorInterrupts = _config.PrioritizeInterrupts;
+            if (FF7ToggleSwitch.DrawRow("##prior_interrupts", Loc.Get("PriorInterrupts"), Loc.Get("PriorInterruptsSub"), ref priorInterrupts,
+                FF7RTheme.LimitRed, Loc.Get("PriorInterruptsTip")))
+            {
+                _config.PrioritizeInterrupts = priorInterrupts;
+                _config.Save();
+            }
+
             // 3. Section: SPEED
             DrawSectionLabel(dl, Loc.Get("Speed"), contentWidth, scale);
 
@@ -212,10 +220,10 @@ public class MainWindow : Window, IDisposable
                 _config.Save();
             }
 
-            var enterDelay = _config.SubmissionDelayMs;
-            if (TacticalSlider.Draw("sub_delay", Loc.Get("SubDelay"), ref enterDelay, 20, 300))
+            var startDelay = _config.StartTypingDelayMs;
+            if (TacticalSlider.Draw("start_delay", Loc.Get("StartDelay"), ref startDelay, 0, 1000))
             {
-                _config.SubmissionDelayMs = enterDelay;
+                _config.StartTypingDelayMs = startDelay;
                 _config.Save();
             }
 
