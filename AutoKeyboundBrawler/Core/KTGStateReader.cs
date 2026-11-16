@@ -276,9 +276,14 @@ public static unsafe class KTGStateReader
     public static bool HasActiveDefenseSentenceOnScreen(
         IReadOnlyList<KTGTargetWord> targets,
         IReadOnlyList<KTGActiveCast>? casts,
-        out KTGTargetWord? defenseTarget)
+        out KTGTargetWord? defenseTarget,
+        string? recentlySubmittedWord = null,
+        double recentSubmitAgeMs = 9999)
     {
-        defenseTarget = targets.FirstOrDefault(t => t.SlotId != 2 && IsDefenseSentence(t.Word, t.SlotId, t.ScreenY, casts));
+        defenseTarget = targets.FirstOrDefault(t =>
+            t.SlotId != 2 &&
+            IsDefenseSentence(t.Word, t.SlotId, t.ScreenY, casts) &&
+            (string.IsNullOrEmpty(recentlySubmittedWord) || recentSubmitAgeMs >= 2500 || !IsSameWord(t.Word, recentlySubmittedWord)));
         return defenseTarget != null;
     }
 
@@ -436,12 +441,17 @@ public static unsafe class KTGStateReader
         bool isAnyNeedlesCasting,
         int? needlesTargetSlotId,
         Configuration config,
-        IReadOnlyList<KTGActiveCast>? activeCasts = null)
+        IReadOnlyList<KTGActiveCast>? activeCasts = null,
+        string? recentlySubmittedWord = null,
+        double recentSubmitAgeMs = 9999)
     {
         // Tier 0: Defensive Sentence (strictly non-boss slots only!)
         if (config.PrioritizeDefense && target.SlotId != 2 && IsDefenseSentence(target.Word, target.SlotId, target.ScreenY, activeCasts))
         {
-            return 0;
+            if (string.IsNullOrEmpty(recentlySubmittedWord) || recentSubmitAgeMs >= 2500 || !IsSameWord(target.Word, recentlySubmittedWord))
+            {
+                return 0;
+            }
         }
 
         // Tier 1: Cactuar casting "??? Needles" / "針？本" (EMERGENCY INTERRUPT - highest kill priority!)
@@ -453,6 +463,16 @@ public static unsafe class KTGStateReader
                 (otherCastingSlotIds.Contains(target.SlotId) && IsCactuarWord(target.Word)))
             {
                 return 1;
+            }
+        }
+
+        // Tier 2: Interruptible Attack (flashing red cast bars like Burr Burrow, Main Cannon, Big Bomber)
+        if (config.PrioritizeInterrupts && activeCasts != null)
+        {
+            var matchCast = activeCasts.FirstOrDefault(c => c.SlotId == target.SlotId && !c.IsInterrupted);
+            if (matchCast != null && AddonKTGEnemyCastBar.IsCastInterruptible(matchCast))
+            {
+                return 2;
             }
         }
 
@@ -519,6 +539,15 @@ public static unsafe class KTGStateReader
             foreach (var t in targets)
             {
                 var wordToCache = t.Word;
+                if (!string.IsNullOrEmpty(recentlySubmittedWord) && IsSameWord(wordToCache, recentlySubmittedWord))
+                {
+                    var isDef = IsDefenseSentence(wordToCache, t.SlotId, t.ScreenY, activeCasts);
+                    if ((isDef && recentSubmitAgeMs < 2500) || (!isDef && recentSubmitAgeMs < 1500))
+                    {
+                        continue;
+                    }
+                }
+
                 if (IsObscuredWord(wordToCache))
                 {
                     var match = KTGWordDatabase.FindMatch(wordToCache);
@@ -585,7 +614,7 @@ public static unsafe class KTGStateReader
         // 1. ABSOLUTE TOP PRIORITY: Defensive Sentence (Player Shield)
         // If an active, unsubmitted defense prompt is on screen, IMMEDIATELY select it before anything else!
         // Never targets boss first when a defense phrase is already on screen.
-        if (config.PrioritizeDefense && HasActiveDefenseSentenceOnScreen(targets, activeCasts, out var defenseTarget) && defenseTarget != null)
+        if (config.PrioritizeDefense && HasActiveDefenseSentenceOnScreen(targets, activeCasts, out var defenseTarget, recentlySubmittedWord, recentSubmitAgeMs) && defenseTarget != null)
         {
             var resolvedWord = defenseTarget.Word;
             if (IsObscuredWord(resolvedWord))
@@ -619,10 +648,10 @@ public static unsafe class KTGStateReader
         {
             needlesTargetSlotId = needlesTarget.SlotId;
 
-            // If this exact word was just submitted within 1200ms, the game is still resolving the hit
+            // If this exact word was just submitted within 1500ms, the game is still resolving the hit
             // and has not yet displayed the Cactuar's next prompt word. Wait for the new word to appear!
             var isStaleSubmittedWord = !string.IsNullOrEmpty(recentlySubmittedWord) &&
-                                       recentSubmitAgeMs < 1200 &&
+                                       recentSubmitAgeMs < 1500 &&
                                        IsSameWord(needlesTarget.Word, recentlySubmittedWord);
 
             if (!isStaleSubmittedWord)
@@ -720,20 +749,37 @@ public static unsafe class KTGStateReader
             return null;
         }
 
-        // Filter out recently submitted word (prevents re-targeting same mob within 1.2s)
-        if (!string.IsNullOrEmpty(recentlySubmittedWord) && recentSubmitAgeMs < 1200)
+        // Filter out recently submitted word (prevents re-targeting same mob or recently submitted prompt)
+        // - Defense Sentences: 2500ms debounce
+        // - Standard prompts: 1500ms debounce
+        if (!string.IsNullOrEmpty(recentlySubmittedWord))
         {
-            var filtered = candidates.Where(t => IsDefenseSentence(t.Word, t.SlotId, t.ScreenY) || !IsSameWord(t.Word, recentlySubmittedWord)).ToList();
-            if (filtered.Count > 0)
+            var isRecentDefense = recentSubmitAgeMs < 2500;
+            var isRecentStandard = recentSubmitAgeMs < 1500;
+
+            if (isRecentDefense || isRecentStandard)
             {
-                candidates = filtered;
+                candidates = candidates.Where(t =>
+                {
+                    if (!IsSameWord(t.Word, recentlySubmittedWord)) return true;
+                    var isDefense = IsDefenseSentence(t.Word, t.SlotId, t.ScreenY, activeCasts);
+                    if (isDefense && isRecentDefense) return false;
+                    if (!isDefense && isRecentStandard) return false;
+                    return true;
+                }).ToList();
             }
+        }
+
+        if (candidates.Count == 0)
+        {
+            return null;
         }
 
         var needleSlotIds = new HashSet<int>();
         var otherCastingSlotIds = new HashSet<int>();
         foreach (var c in activeCasts)
         {
+            if (c.IsInterrupted) continue;
             if (AddonKTGEnemyCastBar.IsNeedlesSpell(c.SpellName))
             {
                 needleSlotIds.Add(c.SlotId);
@@ -748,14 +794,23 @@ public static unsafe class KTGStateReader
         var isAnyNeedlesCasting = AddonKTGEnemyCastBar.HasActiveNeedlesCast(out _, activeCasts);
 
         // Sort candidates by:
-        // 1. Priority tier: Defense Sentence (0) > Needles Cactuar (1) > Other Casting Adds (2) > Cactuar mob (3) > Regular Adds (4) / Wave Mobs (5) > Boss (6/7)
-        // 2. Spatial proximity: lowest enemy on screen first (ScreenY descending = closest to players' wall)
-        // 3. Shorter word length as tie-breaker
+        // 1. Priority tier: Defense Sentence (0) > Needles Cactuar (1) > Interruptible/Other Casting Adds (2) > Cactuar mob (3) > Regular Adds (4) / Wave Mobs (5) > Boss (6/7)
+        // 2. Tie-breaker for Tier 2: Interruptible attacks strictly beat non-interruptible casting adds
+        // 3. Spatial proximity: lowest enemy on screen first (ScreenY descending = closest to players' wall)
+        // 4. Shorter word length as tie-breaker
         candidates.Sort((a, b) =>
         {
-            var pA = GetTargetPriority(a, hasBossOnScreen, needleSlotIds, otherCastingSlotIds, isAnyNeedlesCasting, needlesTargetSlotId, config, activeCasts);
-            var pB = GetTargetPriority(b, hasBossOnScreen, needleSlotIds, otherCastingSlotIds, isAnyNeedlesCasting, needlesTargetSlotId, config, activeCasts);
+            var pA = GetTargetPriority(a, hasBossOnScreen, needleSlotIds, otherCastingSlotIds, isAnyNeedlesCasting, needlesTargetSlotId, config, activeCasts, recentlySubmittedWord, recentSubmitAgeMs);
+            var pB = GetTargetPriority(b, hasBossOnScreen, needleSlotIds, otherCastingSlotIds, isAnyNeedlesCasting, needlesTargetSlotId, config, activeCasts, recentlySubmittedWord, recentSubmitAgeMs);
             if (pA != pB) return pA.CompareTo(pB);
+
+            // Tier 2 tie-breaker: Interruptible casts strictly beat non-interruptible casts
+            if (config.PrioritizeInterrupts && activeCasts != null)
+            {
+                var aInterrupt = activeCasts.Any(c => c.SlotId == a.SlotId && !c.IsInterrupted && AddonKTGEnemyCastBar.IsCastInterruptible(c));
+                var bInterrupt = activeCasts.Any(c => c.SlotId == b.SlotId && !c.IsInterrupted && AddonKTGEnemyCastBar.IsCastInterruptible(c));
+                if (aInterrupt != bInterrupt) return bInterrupt.CompareTo(aInterrupt);
+            }
 
             var yComp = b.ScreenY.CompareTo(a.ScreenY);
             if (yComp != 0) return yComp;
@@ -787,16 +842,21 @@ public static unsafe class KTGStateReader
         return null;
     }
 
-    public static void InvalidateSubmittedWord(string word)
+    public static void InvalidateSubmittedWord(string word, int slotId = -1)
     {
+        if (slotId >= 0)
+        {
+            _targetCache.Remove(slotId);
+        }
+
         if (string.IsNullOrWhiteSpace(word)) return;
 
         List<int>? matches = null;
-        foreach (var (slotId, cached) in _targetCache)
+        foreach (var (sId, cached) in _targetCache)
         {
             if (IsSameWord(cached.Word, word))
             {
-                (matches ??= new()).Add(slotId);
+                (matches ??= new()).Add(sId);
             }
         }
 

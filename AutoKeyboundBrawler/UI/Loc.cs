@@ -144,6 +144,11 @@ public static class Loc
             ("MaxCharDelay", ClientLanguage.French) => "Délai max. entre frappes",
             ("MaxCharDelay", _) => "Max Keystroke Delay",
 
+            ("StartDelay", ClientLanguage.Japanese) => "入力開始遅延 (ms)",
+            ("StartDelay", ClientLanguage.German) => "Startverzögerung",
+            ("StartDelay", ClientLanguage.French) => "Délai avant saisie",
+            ("StartDelay", _) => "Start Typing Delay",
+
             ("SubDelay", ClientLanguage.Japanese) => "決定 (Enter) 遅延 (ms)",
             ("SubDelay", ClientLanguage.German) => "Bestätigungsverzögerung",
             ("SubDelay", ClientLanguage.French) => "Délai de validation",

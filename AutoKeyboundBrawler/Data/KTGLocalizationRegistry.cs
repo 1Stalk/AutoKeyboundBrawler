@@ -486,6 +486,71 @@ public static class KTGLocalizationRegistry
     }
 
     // ------------------------------------------------------------------------
+    // 6b. Interruptible Attacks (Flashing Red Cast Bars & Hit Countdowns: 4 > 3 > 2 > 1)
+    // ------------------------------------------------------------------------
+    public static readonly FrozenSet<uint> InterruptibleActionIds = new HashSet<uint>
+    {
+        49548, // 針孔潜り / Burr Burrow
+        49538, // メインカノン / Main Cannon
+        49703, // ビッグボンバー / Big Bomber
+        49699, // バスターキャノン / Tankbuster
+        49555, // エクリプスメテオ / Ecliptic Meteor
+        49554, // ミールストーム / Charybdis
+        49677, // ダンスマカブル / Sword Danse Macabre
+        49749, // ファーストソング / The First Song
+        49750  // ラストソング / The Last Song
+    }.ToFrozenSet();
+
+    public static readonly string[] LocalizedInterruptibleSpellRoots =
+    [
+        // English & Japanese
+        "burr burrow", "burrow", "針孔潜り",
+        "メインカノン", "main cannon",
+        "ビッグボンバー", "big bomber",
+        "バスターキャノン", "tankbuster",
+        "エクリプスメテオ", "ecliptic meteor",
+        "ミールストーム", "charybdis",
+        "ダンスマカブル", "danse macabre",
+        "ファーストソング", "the first song",
+        "ラストソング", "the last song",
+        // German
+        "nadelgraben", "hauptkanone", "riesenbomber", "totentanz", "erster gesang", "letzter gesang",
+        // French
+        "enfouissement", "canon principal", "gros bombardier", "premier chant", "dernier chant"
+    ];
+
+    public static bool IsInterruptibleCast(string? spellName, uint actionId = 0)
+    {
+        if (actionId > 0 && InterruptibleActionIds.Contains(actionId))
+        {
+            return true;
+        }
+
+        if (string.IsNullOrWhiteSpace(spellName)) return false;
+
+        return LocalizedInterruptibleSpellRoots.Any(root => spellName.Contains(root, StringComparison.OrdinalIgnoreCase));
+    }
+
+    public static readonly string[] LocalizedInterruptedTexts =
+    [
+        "Interrupted!",
+        "中断！",
+        "Unterbrochen!",
+        "Interrompu !"
+    ];
+
+    public static bool IsInterruptedText(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return false;
+        var trimmed = text.Trim();
+        return LocalizedInterruptedTexts.Any(i => trimmed.Contains(i, StringComparison.OrdinalIgnoreCase)) ||
+               trimmed.Contains("Interrupted", StringComparison.OrdinalIgnoreCase) ||
+               trimmed.Contains("中断", StringComparison.OrdinalIgnoreCase) ||
+               trimmed.Contains("Unterbrochen", StringComparison.OrdinalIgnoreCase) ||
+               trimmed.Contains("Interrompu", StringComparison.OrdinalIgnoreCase);
+    }
+
+    // ------------------------------------------------------------------------
     // 7. Registration Confirmation Button
     // ------------------------------------------------------------------------
     public static readonly string[] LocalizedRegisterButtonTexts =

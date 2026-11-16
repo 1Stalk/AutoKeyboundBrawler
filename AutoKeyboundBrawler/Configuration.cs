@@ -40,6 +40,7 @@ public class Configuration : IPluginConfiguration
     public bool SimulateHumanTyping { get; set; } = true;
     public int CharDelayMinMs { get; set; } = 75;
     public int CharDelayMaxMs { get; set; } = 180;
+    public int StartTypingDelayMs { get; set; } = 200;
     public int SubmissionDelayMs { get; set; } = 105;
     public bool IgnorePunctuation { get; set; } = true;
 
@@ -47,6 +48,7 @@ public class Configuration : IPluginConfiguration
     public bool StopOnPenaltyCast { get; set; } = true;
 
     // Targeting Priorities & Mechanics
+    public bool PrioritizeInterrupts { get; set; } = true;
     public bool PrioritizeAdds { get; set; } = true;
     public bool PrioritizeDefense { get; set; } = true;
     public bool AbortForDefense { get; set; } = true;
@@ -65,6 +67,7 @@ public class Configuration : IPluginConfiguration
         // Combat mechanics and safety guards are always active
         StopOnPenaltyCast = true;
 
+        PrioritizeInterrupts = true;
         PrioritizeAdds = true;
         PrioritizeDefense = true;
         AbortForDefense = true;

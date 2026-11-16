@@ -39,6 +39,7 @@ public unsafe class KTGInputSimulator
     private bool _isSubmittingWord;
 
     public bool IsTyping => _pendingActions.Count > 0 || _isSubmittingWord;
+    public bool IsPaused { get; private set; }
     public string CurrentWord { get; private set; } = string.Empty;
     public int RemainingChars => _pendingActions.Count;
     public bool IsDefenseWord { get; set; }
@@ -46,8 +47,23 @@ public unsafe class KTGInputSimulator
     public bool JustSubmitted { get; set; }
     public string LastSubmittedWord { get; private set; } = string.Empty;
 
-    public void EnqueueWord(string word, Configuration config, bool isDefense = false)
+    public void Pause()
     {
+        if (IsPaused) return;
+        IsPaused = true;
+        _stepStopwatch.Stop();
+    }
+
+    public void Resume(int resumeDelayMs = 150)
+    {
+        IsPaused = false;
+        _nextDelayMs = Math.Max(10, resumeDelayMs);
+        _stepStopwatch.Restart();
+    }
+
+    public void EnqueueWord(string word, Configuration config, bool isDefense = false, bool isEmergency = false, bool applyStartDelay = false)
+    {
+        IsPaused = false;
         _pendingActions.Clear();
         _backgroundTypedText.Clear();
         CurrentWord = word;
@@ -104,12 +120,18 @@ public unsafe class KTGInputSimulator
             _pendingActions.Enqueue(new KeyAction(ch));
         }
         _pendingActions.Enqueue(KeyAction.Submit);
-        _nextDelayMs = GetRandomCharDelay(config);
+
+        var initialDelay = (applyStartDelay && !isDefense && !isEmergency && config.StartTypingDelayMs > 0)
+            ? Math.Max(0, config.StartTypingDelayMs + _random.Next(-25, 26))
+            : 0;
+
+        _nextDelayMs = Math.Max(10, initialDelay + GetRandomCharDelay(config));
         _stepStopwatch.Restart();
     }
 
     public void Clear(Configuration? config = null)
     {
+        IsPaused = false;
         _pendingActions.Clear();
         _backgroundTypedText.Clear();
         IsDefenseWord = false;
@@ -121,7 +143,7 @@ public unsafe class KTGInputSimulator
 
     public void Update(Configuration config)
     {
-        if (!IsTyping)
+        if (IsPaused || !IsTyping)
         {
             return;
         }
@@ -187,10 +209,7 @@ public unsafe class KTGInputSimulator
 
         if (_pendingActions.Count > 0)
         {
-            var nextAction = _pendingActions.Peek();
-            _nextDelayMs = nextAction.IsSubmit
-                ? Math.Max(30, config.SubmissionDelayMs)
-                : GetRandomCharDelay(config);
+            _nextDelayMs = GetRandomCharDelay(config);
         }
         else
         {

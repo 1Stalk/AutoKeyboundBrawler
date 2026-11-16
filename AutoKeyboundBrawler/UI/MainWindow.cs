@@ -212,10 +212,10 @@ public class MainWindow : Window, IDisposable
                 _config.Save();
             }
 
-            var enterDelay = _config.SubmissionDelayMs;
-            if (TacticalSlider.Draw("sub_delay", Loc.Get("SubDelay"), ref enterDelay, 20, 300))
+            var startDelay = _config.StartTypingDelayMs;
+            if (TacticalSlider.Draw("start_delay", Loc.Get("StartDelay"), ref startDelay, 0, 1000))
             {
-                _config.SubmissionDelayMs = enterDelay;
+                _config.StartTypingDelayMs = startDelay;
                 _config.Save();
             }
 
