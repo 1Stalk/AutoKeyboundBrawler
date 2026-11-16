@@ -123,9 +123,9 @@ public static class Loc
             ("PriorInterruptsSub", _) => "Focus flashing red cast bars (Main Cannon, Burr Burrow, etc.)",
 
             ("PriorInterruptsTip", ClientLanguage.Japanese) => "赤枠で点滅する危険な詠唱中の敵（ボス・雑魚問わず）を一般雑魚より優先して撃破・中断します。",
-            ("PriorInterruptsTip", ClientLanguage.German) => "Priorisiert Gegner, die unterbrechbare Zauber wirken, um Gruppen-Wipes zu verhindern.",
-            ("PriorInterruptsTip", ClientLanguage.French) => "Cible en priorité les ennemis lançant des sorts interruptibles pour éviter l'échec de la mission.",
-            ("PriorInterruptsTip", _) => "Automatically prioritizes enemies casting interruptible spells before regular adds to prevent duty wipes.",
+            ("PriorInterruptsTip", ClientLanguage.German) => "Priorisiert Gegner, die unterbrechbare Zauber wirken",
+            ("PriorInterruptsTip", ClientLanguage.French) => "Cible en priorité les ennemis lançant des sorts interruptibles.",
+            ("PriorInterruptsTip", _) => "Automatically prioritizes enemies casting interruptible spells before regular adds.",
 
             ("IgnorePunct", ClientLanguage.Japanese) => "句読点・記号の省略",
             ("IgnorePunct", ClientLanguage.German) => "Satzzeichen ignorieren",
