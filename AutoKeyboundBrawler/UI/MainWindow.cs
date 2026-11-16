@@ -194,14 +194,6 @@ public class MainWindow : Window, IDisposable
                 _config.SetAutoBuyCoffers(autoBuy);
             }
 
-            var priorInterrupts = _config.PrioritizeInterrupts;
-            if (FF7ToggleSwitch.DrawRow("##prior_interrupts", Loc.Get("PriorInterrupts"), Loc.Get("PriorInterruptsSub"), ref priorInterrupts,
-                FF7RTheme.LimitRed, Loc.Get("PriorInterruptsTip")))
-            {
-                _config.PrioritizeInterrupts = priorInterrupts;
-                _config.Save();
-            }
-
             // 3. Section: SPEED
             DrawSectionLabel(dl, Loc.Get("Speed"), contentWidth, scale);
 
