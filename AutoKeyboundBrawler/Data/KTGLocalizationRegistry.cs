@@ -503,6 +503,7 @@ public static class KTGLocalizationRegistry
 
     public static readonly string[] LocalizedInterruptibleSpellRoots =
     [
+        // English & Japanese
         "burr burrow", "burrow", "針孔潜り",
         "メインカノン", "main cannon",
         "ビッグボンバー", "big bomber",
@@ -511,7 +512,11 @@ public static class KTGLocalizationRegistry
         "ミールストーム", "charybdis",
         "ダンスマカブル", "danse macabre",
         "ファーストソング", "the first song",
-        "ラストソング", "the last song"
+        "ラストソング", "the last song",
+        // German
+        "nadelgraben", "hauptkanone", "riesenbomber", "totentanz", "erster gesang", "letzter gesang",
+        // French
+        "enfouissement", "canon principal", "gros bombardier", "premier chant", "dernier chant"
     ];
 
     public static bool IsInterruptibleCast(string? spellName, uint actionId = 0)

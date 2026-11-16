@@ -208,7 +208,7 @@ public class KTGAutomationManager
             CurrentStatus = $"SAFETY HALT: {safetyReason}";
             _wasInHalt = true;
 
-            if (AddonKTGEnemyCastBar.IsStopTypingActive())
+            if (AddonKTGEnemyCastBar.IsStopTypingActive() && !KTGSafetyGuard.IsInCutsceneOrTransition && !KTGSafetyGuard.IsPlayerStunned())
             {
                 // Issue #14: Do NOT clear the input buffer or the simulator during no-typing penalty spells!
                 // The game does NOT penalize characters already in the input box; it only penalizes sending inputs.

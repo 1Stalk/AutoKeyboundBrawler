@@ -101,10 +101,15 @@ public static unsafe class AddonKTGEnemyCastBar
                 if (!string.IsNullOrWhiteSpace(text))
                 {
                     text = text.Trim();
-                    var isInterrupted = KTGLocalizationRegistry.IsInterruptedText(text);
+                    if (KTGLocalizationRegistry.IsInterruptedText(text) ||
+                        string.Equals(text, "Casting", StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
                     if (text.Length > 2 && text.Any(char.IsLetter))
                     {
-                        casts.Add(new KTGActiveCast((int)node->NodeId, text, isInterrupted));
+                        casts.Add(new KTGActiveCast((int)node->NodeId, text, false));
                     }
                 }
                 continue;
@@ -185,22 +190,15 @@ public static unsafe class AddonKTGEnemyCastBar
                 {
                     if (obj is Dalamud.Game.ClientState.Objects.Types.IBattleChara chara && chara.IsCasting)
                     {
-                        if (chara.IsCastInterruptible)
+                        var actionId = chara.CastActionId;
+                        var actionName = actionSheet?.GetRowOrDefault(actionId)?.Name.ToString();
+
+                        var matchesSpell = !string.IsNullOrEmpty(actionName) && string.Equals(actionName, cast.SpellName, StringComparison.OrdinalIgnoreCase);
+                        var matchesSlot = cast.SlotId > 0 && chara.EntityId == cast.SlotId;
+
+                        if (matchesSpell || matchesSlot)
                         {
-                            var actionId = chara.CastActionId;
-                            if (actionId > 0 && KTGLocalizationRegistry.IsInterruptibleCast(null, actionId))
-                            {
-                                return true;
-                            }
-
-                            var actionName = actionSheet?.GetRowOrDefault(actionId)?.Name.ToString();
-                            if (!string.IsNullOrEmpty(actionName) && (string.Equals(actionName, cast.SpellName, StringComparison.OrdinalIgnoreCase) ||
-                                                                      KTGLocalizationRegistry.IsInterruptibleCast(actionName, actionId)))
-                            {
-                                return true;
-                            }
-
-                            if (cast.SlotId > 0 && chara.EntityId == cast.SlotId)
+                            if (chara.IsCastInterruptible || KTGLocalizationRegistry.IsInterruptibleCast(actionName, actionId))
                             {
                                 return true;
                             }

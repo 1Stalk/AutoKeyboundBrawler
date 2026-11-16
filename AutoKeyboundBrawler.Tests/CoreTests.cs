@@ -3085,6 +3085,17 @@ public class CoreTests
 
             // 3. InvalidateSubmittedWord with slotId immediately purges slot from cache
             KTGStateReader.InvalidateSubmittedWord("AnyWord", 106);
+
+            // 4. GetBestTarget strictly honors 2500ms debounce for fading defense sentences (e.g. at 1800ms)
+            AddonKTGEWord.SetActiveSlotsOverrideForTesting(new List<int> { 106 });
+            AddonKTGEWord.SetActiveTargetsOverrideForTesting(defenseTargets);
+
+            var defenseAt1800ms = KTGStateReader.GetBestTarget(config, recentlySubmittedWord: "防御壁展開", recentSubmitAgeMs: 1800);
+            Assert.Null(defenseAt1800ms); // Must NOT re-target fading defense sentence at 1.8s!
+
+            var defenseAt2600ms = KTGStateReader.GetBestTarget(config, recentlySubmittedWord: "防御壁展開", recentSubmitAgeMs: 2600);
+            Assert.NotNull(defenseAt2600ms);
+            Assert.Equal("防御壁展開", defenseAt2600ms.Word);
         }
         finally
         {
@@ -3092,6 +3103,121 @@ public class CoreTests
             AddonKTGEWord.SetActiveTargetsOverrideForTesting(null);
             KTGStateReader.ClearCache();
         }
+    }
+
+    [Fact]
+    public void TestIssue13_Tier2_InterruptibleBossBeatsNonInterruptibleCastingAdd()
+    {
+        try
+        {
+            var config = new Configuration
+            {
+                PrioritizeInterrupts = true,
+                PrioritizeAdds = true
+            };
+
+            var bossTarget = new KTGTargetWord(2, "MandragoraBoss", 400f, 100f);
+            var castingAdd = new KTGTargetWord(20001, "CastingAdd", 520f, 100f);
+
+            AddonKTGEWord.SetActiveSlotsOverrideForTesting(new List<int> { 2, 20001 });
+            AddonKTGEWord.SetActiveTargetsOverrideForTesting(new List<KTGTargetWord> { bossTarget, castingAdd });
+
+            // Boss casting interruptible attack ("Burr Burrow"), Add casting regular attack ("Burst")
+            var casts = new List<KTGActiveCast>
+            {
+                new(2, "Burr Burrow", IsInterrupted: false),
+                new(20001, "Burst", IsInterrupted: false)
+            };
+            AddonKTGEnemyCastBar.SetActiveCastsOverrideForTesting(casts);
+
+            var best = KTGStateReader.GetBestTarget(config);
+            Assert.NotNull(best);
+            // Interruptible boss cast MUST beat the non-interruptible casting add even though the add is lower on screen (520 > 400)!
+            Assert.Equal(2, best.SlotId);
+            Assert.Equal("MandragoraBoss", best.Word);
+        }
+        finally
+        {
+            AddonKTGEWord.SetActiveSlotsOverrideForTesting(null);
+            AddonKTGEWord.SetActiveTargetsOverrideForTesting(null);
+            AddonKTGEnemyCastBar.SetActiveCastsOverrideForTesting(null);
+            KTGStateReader.ClearCache();
+        }
+    }
+
+    [Fact]
+    public void TestIssue14_SafetyHalt_CutsceneOrTransition_ClearsSimulator()
+    {
+        try
+        {
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(inDuty: true, inSquare: false);
+            AddonKTGInput.SetDirectOverridesForTesting(true, true);
+
+            var config = new Configuration
+            {
+                Enabled = true,
+                MinigameAutoplay = true,
+                StopOnPenaltyCast = true
+            };
+
+            var manager = new KTGAutomationManager(config, null);
+
+            AddonKTGEWord.SetActiveSlotsOverrideForTesting(new List<int> { 101 });
+            AddonKTGEWord.SetActiveTargetsOverrideForTesting(new List<KTGTargetWord>
+            {
+                new(101, "TargetWord", 500f, 100f)
+            });
+
+            manager.Tick();
+            Assert.True(manager.IsTyping);
+
+            var simField = typeof(KTGAutomationManager).GetField("_simulator", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            Assert.NotNull(simField);
+            var sim = (KTGInputSimulator)simField.GetValue(manager)!;
+
+            // Penalty cast triggers -> pauses simulator
+            AddonKTGEnemyCastBar.SetStopTypingOverrideForTesting(true, "Dynamic Sensory Jammer");
+            manager.Tick();
+            Assert.True(sim.IsPaused);
+            Assert.True(manager.IsTyping);
+
+            // While halt is active, wave transitions to cutscene -> must clear simulator safely!
+            KTGSafetyGuard.SetCutsceneOverrideForTesting(true);
+            manager.Tick();
+
+            Assert.False(manager.IsTyping);
+            Assert.Equal(string.Empty, manager.ActiveWord);
+            Assert.False(sim.IsTyping);
+        }
+        finally
+        {
+            AddonKTGEnemyCastBar.Reset();
+            KTGSafetyGuard.SetCutsceneOverrideForTesting(null);
+            KTGSafetyGuard.SetTerritoryOverridesForTesting(null, null);
+            AddonKTGEWord.SetActiveSlotsOverrideForTesting(null);
+            AddonKTGEWord.SetActiveTargetsOverrideForTesting(null);
+            AddonKTGInput.SetDirectOverridesForTesting(null, null);
+            KTGStateReader.ClearCache();
+        }
+    }
+
+    [Fact]
+    public void TestIssue13_IsCastInterruptible_DoesNotFalsePositiveOnUnrelatedCasts()
+    {
+        // 1. Non-interruptible regular spell returns false
+        var normalCast = new KTGActiveCast(20001, "Fire IV", IsInterrupted: false);
+        Assert.False(AddonKTGEnemyCastBar.IsCastInterruptible(normalCast));
+
+        // 2. Interrupted cast returns false even if the spell name is interruptible
+        var interruptedCast = new KTGActiveCast(2, "Burr Burrow", IsInterrupted: true);
+        Assert.False(AddonKTGEnemyCastBar.IsCastInterruptible(interruptedCast));
+
+        // 3. Known interruptible casts return true
+        var burrCast = new KTGActiveCast(2, "Burr Burrow", IsInterrupted: false);
+        Assert.True(AddonKTGEnemyCastBar.IsCastInterruptible(burrCast));
+
+        var cannonCast = new KTGActiveCast(2, "Main Cannon", IsInterrupted: false);
+        Assert.True(AddonKTGEnemyCastBar.IsCastInterruptible(cannonCast));
     }
 }
 
