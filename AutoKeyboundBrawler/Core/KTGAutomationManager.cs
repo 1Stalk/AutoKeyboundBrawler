@@ -109,6 +109,12 @@ public class KTGAutomationManager
             KTGAntiAfk.KeepAlive(_config);
         }
 
+        // "No usable keyboard found - proceed?" prompt blocks queue/commence flow; answer Yes automatically.
+        if (HandleKeyboardWarning())
+        {
+            return;
+        }
+
         switch (CurrentPhase)
         {
             case EventPhase.InMinigame:
@@ -189,6 +195,57 @@ public class KTGAutomationManager
         {
             _rolledDelays.Clear();
         }
+    }
+
+    // ── Keyboard Warning ────────────────────────────────────────────────
+
+    private DateTime _keyboardWarningSeenAt = DateTime.MinValue;
+
+    /// <summary>
+    /// Auto-answers the game's "usable keyboard could not be found" Yes/No dialog after a short humanized delay.
+    /// Returns true while the dialog is open (so the rest of the tick is skipped).
+    /// </summary>
+    private bool HandleKeyboardWarning()
+    {
+        // Only act while the AFK Loop is on.
+        if (!_config.AutoLoopEnabled)
+        {
+            _keyboardWarningSeenAt = DateTime.MinValue;
+            return false;
+        }
+
+        bool isOpen;
+        try
+        {
+            isOpen = AddonKTGKeyboardWarning.IsOpen();
+        }
+        catch
+        {
+            isOpen = false;
+        }
+
+        if (!isOpen)
+        {
+            _keyboardWarningSeenAt = DateTime.MinValue;
+            return false;
+        }
+
+        if (_keyboardWarningSeenAt == DateTime.MinValue)
+        {
+            _keyboardWarningSeenAt = DateTime.UtcNow;
+            _log?.Information("[AutoKeyboundBrawler] Keyboard-not-found prompt detected. Auto-proceeding...");
+        }
+
+        CurrentStatus = "Keyboard warning prompt (auto-proceeding...)";
+
+        if (IsHumanizedReady("keyboardWarning", _keyboardWarningSeenAt, 0.4f, 0.8f) && AddonKTGKeyboardWarning.Proceed())
+        {
+            _keyboardWarningSeenAt = DateTime.MinValue;
+            _lastActionTime = DateTime.UtcNow;
+            ConsumeHumanizedDelay("keyboardWarning");
+        }
+
+        return true;
     }
 
     // ── Phase Handlers ──────────────────────────────────────────────────
