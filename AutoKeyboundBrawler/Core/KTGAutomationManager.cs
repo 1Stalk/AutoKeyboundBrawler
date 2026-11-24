@@ -57,6 +57,14 @@ public class KTGAutomationManager
     public SquareSubPhase CurrentSquareSubPhase => _squareSubPhase;
     public bool IsNavigationReady => _nav.IsVNavReady;
     private EventPhase _previousPhase = EventPhase.None;
+    private DateTime _phaseEnteredAt = DateTime.MinValue;
+
+    /// <summary>
+    /// Reference time for humanized UI-reaction delays: the later of the last automated action and
+    /// the moment the current phase's window appeared. Without the phase-entry term, a stale
+    /// _lastActionTime (e.g. from minutes ago) makes the delay already elapsed, so the click fires instantly.
+    /// </summary>
+    private DateTime ReactionBaseline => _lastActionTime > _phaseEnteredAt ? _lastActionTime : _phaseEnteredAt;
 
     public KTGAutomationManager(Configuration config, IDalamudPluginInterface? pi, IPluginLog? log)
     {
@@ -95,6 +103,10 @@ public class KTGAutomationManager
         if (_previousPhase != EventPhase.InMinigame && CurrentPhase == EventPhase.InMinigame)
         {
             KTGAntiAfk.ResetTimers();
+        }
+        if (_previousPhase != CurrentPhase)
+        {
+            _phaseEnteredAt = DateTime.UtcNow;
         }
         _previousPhase = CurrentPhase;
 
@@ -464,7 +476,7 @@ public class KTGAutomationManager
         AddonKTGEnemyCastBar.Reset();
         KTGStateReader.ClearCache();
 
-        if (_config.AutoLoopEnabled && IsHumanizedReady("results", _lastActionTime, 1.5f, 2.0f))
+        if (_config.AutoLoopEnabled && IsHumanizedReady("results", ReactionBaseline, 1.5f, 2.0f))
         {
             var delay = GetHumanizedDelay("results", 1.5f, 2.0f);
             _log?.Information($"[AutoKeyboundBrawler] Auto-closing results screen (waited {delay}ms)...");
@@ -485,7 +497,7 @@ public class KTGAutomationManager
         _wasInHalt = false;
         KTGStateReader.ClearCache();
 
-        if (_config.AutoLoopEnabled && IsHumanizedReady("commence", _lastActionTime, 0.8f, 1.2f))
+        if (_config.AutoLoopEnabled && IsHumanizedReady("commence", ReactionBaseline, 0.8f, 1.2f))
         {
             var delay = GetHumanizedDelay("commence", 0.8f, 1.2f);
             _log?.Information($"[AutoKeyboundBrawler] Duty popped! Auto-commencing (waited {delay}ms)...");
@@ -528,7 +540,7 @@ public class KTGAutomationManager
         _wasInHalt = false;
         KTGStateReader.ClearCache();
 
-        if (_config.AutoLoopEnabled && IsHumanizedReady("register", _lastActionTime, 0.5f, 0.9f))
+        if (_config.AutoLoopEnabled && IsHumanizedReady("register", ReactionBaseline, 0.5f, 0.9f))
         {
             var delay = GetHumanizedDelay("register", 0.5f, 0.9f);
             _log?.Information($"[AutoKeyboundBrawler] Auto-confirming registration (waited {delay}ms)...");
