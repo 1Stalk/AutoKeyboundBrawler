@@ -12,7 +12,7 @@
 </p>
 
 <p align="center">
-  <em>Type less. Win more. Automated typing solver for the Keybound Brawler event in FFXIV.</em>
+  <em>Type less. Win more.</em>
 </p>
 
 ---
